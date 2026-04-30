@@ -1,0 +1,159 @@
+/* ── Button ── */
+.mirlo-subscribe-btn {
+    background-color: var(--mirlo-btn-color, #ff6b6b);
+    color: #fff;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: 600;
+    transition: filter 0.2s;
+}
+
+.mirlo-subscribe-btn:hover {
+    filter: brightness(0.9);
+}
+
+/* ── Modal shell ── */
+.mirlo-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 99999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.mirlo-modal.hidden {
+    display: none;
+}
+
+.mirlo-modal-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+}
+
+.mirlo-modal-content {
+    position: relative;
+    background: #fff;
+    border-radius: 10px;
+    padding: 40px;
+    max-width: 580px;
+    width: 90%;
+    max-height: 85vh;
+    overflow-y: auto;
+    box-shadow: 0 12px 48px rgba(0, 0, 0, 0.25);
+}
+
+/* ── Close button ── */
+.mirlo-modal-close {
+    position: absolute;
+    top: 12px;
+    right: 16px;
+    background: none;
+    border: none;
+    font-size: 28px;
+    line-height: 1;
+    cursor: pointer;
+    color: #888;
+    padding: 4px 8px;
+}
+
+.mirlo-modal-close:hover {
+    color: #333;
+}
+
+/* ── Loading state ── */
+.mirlo-loading.hidden {
+    display: none;
+}
+
+.mirlo-loading {
+    text-align: center;
+    padding: 30px 0;
+    color: #888;
+    font-style: italic;
+}
+
+/* ── Artist header ── */
+.mirlo-modal-body.hidden {
+    display: none;
+}
+
+.mirlo-modal-artist {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin-bottom: 28px;
+    text-align: center;
+}
+
+.mirlo-artist-avatar {
+    width: 96px;
+    height: 96px;
+    border-radius: 50%;
+    object-fit: cover;
+    margin-bottom: 12px;
+    background: #eee;
+}
+
+.mirlo-artist-name {
+    margin: 0;
+    font-size: 22px;
+}
+
+/* ── Tiers ── */
+.mirlo-tiers-list {
+    display: grid;
+    gap: 12px;
+}
+
+.mirlo-tier {
+    border: 2px solid #e0e0e0;
+    border-radius: 6px;
+    padding: 16px 18px;
+    cursor: pointer;
+    text-decoration: none;
+    color: inherit;
+    display: block;
+    transition: border-color 0.2s, background 0.2s;
+}
+
+.mirlo-tier:hover {
+    border-color: var(--mirlo-btn-color, #ff6b6b);
+    background: rgba(255, 107, 107, 0.05);
+    color: inherit;
+    text-decoration: none;
+}
+
+.mirlo-tier-name {
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.mirlo-tier-price {
+    color: var(--mirlo-btn-color, #ff6b6b);
+    font-weight: 700;
+    font-size: 18px;
+}
+
+.mirlo-tier-description {
+    font-size: 14px;
+    color: #666;
+    margin-top: 8px;
+    line-height: 1.5;
+}
+
+.mirlo-no-tiers {
+    text-align: center;
+    color: #888;
+    padding: 16px 0;
+}
+
+/* ── Error ── */
+.mirlo-error {
+    color: #c0392b;
+    font-size: 14px;
+}
