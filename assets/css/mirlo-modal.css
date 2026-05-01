@@ -15,6 +15,22 @@
     filter: brightness(0.9);
 }
 
+.mirlo-subscribe-btn--full-width {
+    display: block;
+    width: 100%;
+}
+
+/* ── Inline tiers ── */
+.mirlo-tiers-inline {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.mirlo-tiers-inline .mirlo-tier {
+    flex: 1 1 200px;
+}
+
 /* ── Modal shell ── */
 .mirlo-modal {
     position: fixed;
