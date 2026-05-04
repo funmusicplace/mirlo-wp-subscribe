@@ -112,6 +112,8 @@ class Mirlo_Shortcode {
             MIRLO_SUBSCRIBE_VERSION
         );
 
+        wp_add_inline_style( 'mirlo-modal', $this->get_theme_color_css() );
+
         wp_enqueue_script(
             'mirlo-modal',
             MIRLO_SUBSCRIBE_URL . 'assets/js/mirlo-modal.js',
@@ -128,6 +130,50 @@ class Mirlo_Shortcode {
                 'nonce'    => wp_create_nonce( 'mirlo_nonce' ),
             )
         );
+    }
+
+    private function get_theme_color_css() {
+        $primary    = null;
+        $foreground = null;
+        $background = null;
+
+        // WP 5.9+ block themes expose colors via wp_get_global_styles().
+        if ( function_exists( 'wp_get_global_styles' ) ) {
+            $global = wp_get_global_styles();
+            $foreground = $global['color']['text']       ?? null;
+            $background = $global['color']['background'] ?? null;
+            // 'elements.button' is where block themes put the button background.
+            $primary    = $global['elements']['button']['color']['background'] ?? null;
+        }
+
+        // Classic themes that register a color palette via add_theme_support.
+        if ( ! $primary ) {
+            $palette = get_theme_support( 'editor-color-palette' );
+            if ( ! empty( $palette[0] ) ) {
+                foreach ( $palette[0] as $color ) {
+                    $slug = $color['slug'] ?? '';
+                    if ( in_array( $slug, array( 'primary', 'accent', 'foreground' ), true ) ) {
+                        $primary = $color['color'];
+                        break;
+                    }
+                }
+                // Fall back to the first palette color.
+                if ( ! $primary && ! empty( $palette[0][0]['color'] ) ) {
+                    $primary = $palette[0][0]['color'];
+                }
+            }
+        }
+
+        $vars = array();
+        if ( $primary )    { $vars[] = '--mirlo-accent: '     . sanitize_hex_color( $primary )    . ';'; }
+        if ( $foreground ) { $vars[] = '--mirlo-foreground: ' . sanitize_hex_color( $foreground ) . ';'; }
+        if ( $background ) { $vars[] = '--mirlo-background: ' . sanitize_hex_color( $background ) . ';'; }
+
+        if ( empty( $vars ) ) {
+            return '';
+        }
+
+        return '#mirlo-modal { ' . implode( ' ', $vars ) . ' }';
     }
 
     public function ajax_fetch_artist() {

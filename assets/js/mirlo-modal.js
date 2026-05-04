@@ -4,14 +4,6 @@ jQuery(document).ready(function ($) {
   var $body = $(".mirlo-modal-body", $modal);
   var $loading = $(".mirlo-loading", $modal);
 
-  // Apply saved button colour as a CSS custom property
-  var btnColor = getComputedStyle(document.documentElement)
-    .getPropertyValue("--mirlo-btn-color")
-    .trim();
-  if (!btnColor) {
-    // fallback — server inlines this via wp_add_inline_style if configured
-  }
-
   // ── Open ──────────────────────────────────────────────────────────────
   $(document).on("click", ".mirlo-subscribe-btn", function () {
     var slug = $(this).data("artist-slug");
@@ -86,7 +78,6 @@ jQuery(document).ready(function ($) {
 
   // ── Render ────────────────────────────────────────────────────────────
   function renderModal(data) {
-    console.log("data", data);
     var artist = data.artist;
     var tiers = data.tiers || [];
 
