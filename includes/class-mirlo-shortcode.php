@@ -21,6 +21,7 @@ class Mirlo_Shortcode {
                 'artist'      => '',
                 'button_text' => 'Subscribe',
                 'full_width'  => 'false',
+                'color'       => '',
             ),
             $atts
         );
@@ -34,10 +35,16 @@ class Mirlo_Shortcode {
             $classes .= ' mirlo-subscribe-btn--full-width';
         }
 
+        $color       = sanitize_hex_color( $atts['color'] );
+        $color_attr  = $color ? ' data-btn-color="' . esc_attr( $color ) . '"' : '';
+        $color_style = $color ? ' style="--mirlo-accent:' . esc_attr( $color ) . '"' : '';
+
         return sprintf(
-            '<button class="%s" data-artist-slug="%s">%s</button>',
+            '<button class="%s" data-artist-slug="%s"%s%s>%s</button>',
             esc_attr( $classes ),
             esc_attr( $atts['artist'] ),
+            $color_attr,
+            $color_style,
             esc_html( $atts['button_text'] )
         );
     }
@@ -50,6 +57,7 @@ class Mirlo_Shortcode {
         $atts = shortcode_atts(
             array(
                 'artist' => '',
+                'color'  => '',
             ),
             $atts
         );
@@ -77,7 +85,10 @@ class Mirlo_Shortcode {
             return '<p class="mirlo-no-tiers">No subscription tiers available.</p>';
         }
 
-        $html = '<div class="mirlo-tiers-inline">';
+        $color       = sanitize_hex_color( $atts['color'] );
+        $color_style = $color ? ' style="--mirlo-accent:' . esc_attr( $color ) . '"' : '';
+
+        $html = '<div class="mirlo-tiers-inline"' . $color_style . '>';
         foreach ( $tiers as $tier ) {
             $currency    = strtoupper( $tier['currency'] ?? $artist_currency );
             $amount      = isset( $tier['minAmount'] ) && null !== $tier['minAmount']
@@ -139,47 +150,68 @@ class Mirlo_Shortcode {
     }
 
     private function get_theme_color_css() {
-        $primary    = null;
+        $accent     = null;
         $foreground = null;
         $background = null;
 
-        // WP 5.9+ block themes expose colors via wp_get_global_styles().
+        // WP 5.9+ block themes: wp_get_global_styles() returns values as either
+        // a hex color or a preset reference like "var:preset|color|primary".
+        // resolve_color_value() converts preset references to CSS custom properties.
         if ( function_exists( 'wp_get_global_styles' ) ) {
-            $global = wp_get_global_styles();
-            $foreground = $global['color']['text']       ?? null;
-            $background = $global['color']['background'] ?? null;
-            // 'elements.button' is where block themes put the button background.
-            $primary    = $global['elements']['button']['color']['background'] ?? null;
+            $global     = wp_get_global_styles();
+            $foreground = $this->resolve_color_value( $global['color']['text']                             ?? null );
+            $background = $this->resolve_color_value( $global['color']['background']                       ?? null );
+            $accent     = $this->resolve_color_value( $global['elements']['button']['color']['background'] ?? null );
         }
 
         // Classic themes that register a color palette via add_theme_support.
-        if ( ! $primary ) {
+        // These always give us raw hex values.
+        if ( ! $accent ) {
             $palette = get_theme_support( 'editor-color-palette' );
             if ( ! empty( $palette[0] ) ) {
                 foreach ( $palette[0] as $color ) {
                     $slug = $color['slug'] ?? '';
                     if ( in_array( $slug, array( 'primary', 'accent', 'foreground' ), true ) ) {
-                        $primary = $color['color'];
+                        $accent = sanitize_hex_color( $color['color'] );
                         break;
                     }
                 }
-                // Fall back to the first palette color.
-                if ( ! $primary && ! empty( $palette[0][0]['color'] ) ) {
-                    $primary = $palette[0][0]['color'];
+                if ( ! $accent && ! empty( $palette[0][0]['color'] ) ) {
+                    $accent = sanitize_hex_color( $palette[0][0]['color'] );
                 }
             }
         }
 
+        // Settings color overrides the theme color.
+        $settings_color = sanitize_hex_color( get_option( 'mirlo_button_color', '' ) );
+        if ( $settings_color ) {
+            $accent = $settings_color;
+        }
+
         $vars = array();
-        if ( $primary )    { $vars[] = '--mirlo-accent: '     . sanitize_hex_color( $primary )    . ';'; }
-        if ( $foreground ) { $vars[] = '--mirlo-foreground: ' . sanitize_hex_color( $foreground ) . ';'; }
-        if ( $background ) { $vars[] = '--mirlo-background: ' . sanitize_hex_color( $background ) . ';'; }
+        if ( $accent )     { $vars[] = '--mirlo-accent: '     . $accent     . ';'; }
+        if ( $foreground ) { $vars[] = '--mirlo-foreground: ' . $foreground . ';'; }
+        if ( $background ) { $vars[] = '--mirlo-background: ' . $background . ';'; }
 
         if ( empty( $vars ) ) {
             return '';
         }
 
         return '#mirlo-modal { ' . implode( ' ', $vars ) . ' }';
+    }
+
+    // Converts "var:preset|color|primary" → "var(--wp--preset--color--primary)".
+    // Returns sanitized hex colors unchanged, and null for anything unrecognisable.
+    private function resolve_color_value( $value ) {
+        if ( ! $value ) {
+            return null;
+        }
+        if ( preg_match( '/^var:preset\|([a-z0-9-]+)\|([a-z0-9-]+)$/i', $value, $m ) ) {
+            $feature = sanitize_key( $m[1] );
+            $slug    = sanitize_key( $m[2] );
+            return 'var(--wp--preset--' . $feature . '--' . $slug . ')';
+        }
+        return sanitize_hex_color( $value ) ?: null;
     }
 
     public function ajax_fetch_artist() {

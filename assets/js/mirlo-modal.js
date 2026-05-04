@@ -15,7 +15,8 @@ jQuery(document).ready(function ($) {
   // ── Open ──────────────────────────────────────────────────────────────
   $(document).on("click", ".mirlo-subscribe-btn", function () {
     var slug = $(this).data("artist-slug");
-    openModal();
+    var color = $(this).data("btn-color") || "";
+    openModal(color);
     fetchArtist(slug);
   });
 
@@ -150,7 +151,8 @@ jQuery(document).ready(function ($) {
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────
-  function openModal() {
+  function openModal(color) {
+    $modal[0].style.setProperty("--mirlo-accent", color || "");
     $loading.text("Loading…").removeClass("hidden");
     $body.addClass("hidden");
     $modal.removeClass("hidden");

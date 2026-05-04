@@ -35,7 +35,7 @@ class Mirlo_Admin {
             array(
                 'type'              => 'string',
                 'sanitize_callback' => 'sanitize_hex_color',
-                'default'           => '#ff6b6b',
+                'default'           => '',
             )
         );
 
@@ -144,9 +144,10 @@ class Mirlo_Admin {
     }
 
     public function render_button_color_field() {
-        $value = get_option( 'mirlo_button_color', '#ff6b6b' );
+        $value = get_option( 'mirlo_button_color', '' );
         printf(
-            '<input type="text" id="mirlo_button_color" name="mirlo_button_color" value="%s" class="mirlo-color-picker">',
+            '<input type="text" id="mirlo_button_color" name="mirlo_button_color" value="%s" class="mirlo-color-picker">
+             <p class="description">Leave blank to inherit the theme color.</p>',
             esc_attr( $value )
         );
     }
