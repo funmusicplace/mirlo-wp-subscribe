@@ -1,0 +1,30 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build zip
+        run: |
+          mkdir -p dist/mirlo-subscribe
+          rsync -r --exclude='.git' --exclude='.github' --exclude='dist' --exclude='*.md' \
+            . dist/mirlo-subscribe/
+          cd dist
+          zip -r mirlo-subscribe-${{ steps.version.outputs.version }}.zip mirlo-subscribe/
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/mirlo-subscribe-${{ steps.version.outputs.version }}.zip
+          generate_release_notes: true
