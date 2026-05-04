@@ -4,6 +4,14 @@ jQuery(document).ready(function ($) {
   var $body = $(".mirlo-modal-body", $modal);
   var $loading = $(".mirlo-loading", $modal);
 
+  // Format any inline server-rendered tier prices (data-amount + data-currency).
+  $(".mirlo-tier-price[data-amount]").each(function () {
+    var $el = $(this);
+    var amount = parseFloat($el.data("amount"));
+    var currency = String($el.data("currency"));
+    $el.text(formatCurrency(amount, currency) + "/month");
+  });
+
   // ── Open ──────────────────────────────────────────────────────────────
   $(document).on("click", ".mirlo-subscribe-btn", function () {
     var slug = $(this).data("artist-slug");
@@ -80,6 +88,9 @@ jQuery(document).ready(function ($) {
   function renderModal(data) {
     var artist = data.artist;
     var tiers = data.tiers || [];
+    var artistCurrency = artist.user && artist.user.currency
+      ? artist.user.currency.toUpperCase()
+      : "USD";
 
     var avatarSrc =
       artist.avatar && artist.avatar.sizes && artist.avatar.sizes[300]
@@ -97,9 +108,12 @@ jQuery(document).ready(function ($) {
     } else {
       tiersHtml = tiers
         .map(function (tier) {
+          var currency = tier.currency
+            ? tier.currency.toUpperCase()
+            : artistCurrency;
           var price =
             tier.minAmount != null
-              ? "$" + (tier.minAmount / 100).toFixed(2) + "/month"
+              ? formatCurrency(tier.minAmount / 100, currency) + "/month"
               : "Free";
           return (
             '<button class="mirlo-tier" data-artist-id="' +
@@ -147,6 +161,18 @@ jQuery(document).ready(function ($) {
   function closeModal() {
     $modal.addClass("hidden");
     $("body").css("overflow", "");
+  }
+
+  function formatCurrency(amount, currency) {
+    try {
+      return new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency: currency,
+        minimumFractionDigits: 2,
+      }).format(amount);
+    } catch (e) {
+      return currency + " " + amount.toFixed(2);
+    }
   }
 
   function escHtml(str) {

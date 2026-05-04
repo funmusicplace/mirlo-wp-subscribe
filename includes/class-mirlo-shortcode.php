@@ -69,8 +69,9 @@ class Mirlo_Shortcode {
             return '<p class="mirlo-error">Artist not found.</p>';
         }
 
-        $artist = $artist_data['result'];
-        $tiers  = $artist['subscriptionTiers'] ?? array();
+        $artist          = $artist_data['result'];
+        $tiers           = $artist['subscriptionTiers'] ?? array();
+        $artist_currency = strtoupper( $artist['user']['currency'] ?? 'USD' );
 
         if ( empty( $tiers ) ) {
             return '<p class="mirlo-no-tiers">No subscription tiers available.</p>';
@@ -78,24 +79,29 @@ class Mirlo_Shortcode {
 
         $html = '<div class="mirlo-tiers-inline">';
         foreach ( $tiers as $tier ) {
-            $price = isset( $tier['minAmount'] ) && null !== $tier['minAmount']
-                ? '$' . number_format( $tier['minAmount'] / 100, 2 ) . '/month'
-                : 'Free';
-
+            $currency    = strtoupper( $tier['currency'] ?? $artist_currency );
+            $amount      = isset( $tier['minAmount'] ) && null !== $tier['minAmount']
+                ? $tier['minAmount'] / 100
+                : null;
             $description = ! empty( $tier['description'] )
                 ? '<div class="mirlo-tier-description">' . esc_html( $tier['description'] ) . '</div>'
+                : '';
+
+            $price_attrs = null !== $amount
+                ? ' data-amount="' . esc_attr( $amount ) . '" data-currency="' . esc_attr( $currency ) . '"'
                 : '';
 
             $html .= sprintf(
                 '<button class="mirlo-tier" data-artist-id="%s" data-tier-id="%s">'
                 . '<div class="mirlo-tier-name">%s</div>'
-                . '<div class="mirlo-tier-price">%s</div>'
+                . '<div class="mirlo-tier-price"%s>%s</div>'
                 . '%s'
                 . '</button>',
                 esc_attr( (string) $artist['id'] ),
                 esc_attr( (string) $tier['id'] ),
                 esc_html( $tier['name'] ),
-                esc_html( $price ),
+                $price_attrs,
+                null === $amount ? 'Free' : '',
                 $description
             );
         }
