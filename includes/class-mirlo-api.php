@@ -24,6 +24,30 @@ class Mirlo_API {
         );
     }
 
+    /**
+     * Unified purchase endpoint (replacement for subscribe() above).
+     * Kept separate from subscribe() so the new checkout flow can be
+     * exercised via [mirlo_subscribe_v2] without touching the existing shortcode.
+     */
+    public function purchase_subscription( $artist_id, $tier_id, $success_url = null ) {
+        $body = array(
+            'artistId' => intval( $artist_id ),
+            'hosted'   => true,
+            'items'    => array(
+                array(
+                    'type'   => 'subscription',
+                    'tierId' => intval( $tier_id ),
+                ),
+            ),
+        );
+
+        if ( $success_url ) {
+            $body['successUrl'] = $success_url;
+        }
+
+        return $this->make_request( '/purchase', 'POST', $body );
+    }
+
     private function make_request( $endpoint, $method = 'GET', $body = null ) {
         $url  = $this->base_url . $endpoint;
         $args = array(

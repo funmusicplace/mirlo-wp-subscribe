@@ -197,7 +197,7 @@ class Mirlo_Shortcode {
             return '';
         }
 
-        return '#mirlo-modal { ' . implode( ' ', $vars ) . ' }';
+        return ':root { ' . implode( ' ', $vars ) . ' }';
     }
 
     // Converts "var:preset|color|primary" → "var(--wp--preset--color--primary)".

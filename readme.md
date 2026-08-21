@@ -4,7 +4,7 @@ Contributors: Mirlo Code Circle
 Tags: mirlo, music, subscriptions, modal
 Requires at least: 6.0
 Tested up to: 6.5
-Stable tag: 1.1.3
+Stable tag: 1.1.6
 License: AGPLv3 or later
 
 Add Mirlo artist subscription modals to any post or page via shortcode.
@@ -20,8 +20,8 @@ live from the Mirlo API.
 
 Shortcode usage:
 
-    [mirlo_subscribe artist="your-artist-slug"]
-    [mirlo_subscribe artist="your-artist-slug" button_text="Support me" full_width="true"]
+    [mirlo_tier_list artist="your-artist-slug"]
+    [mirlo_pop_up artist="your-artist-slug" button_text="Support me" full_width="true" success_url="https://yoursite.com/thanks"]
 
 ### Tiers
 
