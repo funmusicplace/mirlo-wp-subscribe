@@ -40,25 +40,6 @@
   gap: 16px;
 }
 
-/* Divider after the first 4 tiers (2nd row): positioned relative to the
-   4th tile since the ::after itself isn't a grid item and can't span columns. */
-.mirlo-tiers-inline .mirlo-tier:nth-child(4),
-.mirlo-tiers-inline .mirlo-tier-v2:nth-child(4) {
-  position: relative;
-}
-
-.mirlo-tiers-inline .mirlo-tier:nth-child(4)::after,
-.mirlo-tiers-inline .mirlo-tier-v2:nth-child(4)::after {
-  content: "";
-  position: absolute;
-  left: -100%;
-  padding: 12px;
-  right: 0;
-  bottom: -11px;
-  height: 2px;
-  background: var(--mirlo-border-color, #ddd);
-}
-
 /* ── Modal shell ── */
 .mirlo-modal {
   position: fixed;
