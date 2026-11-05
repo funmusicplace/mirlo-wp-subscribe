@@ -53,7 +53,12 @@ jQuery(document).ready(function ($) {
         if (response.success) {
           window.location.href = response.data.redirectUrl;
         } else {
-          showError(JSON.stringify(response.data, null, 2));
+          console.log("Mirlo checkout failed", response);
+          var data = response.data || {};
+          showError(
+            (data.message || "Couldn't start the checkout.") +
+              (data.detail ? " (" + data.detail + ")" : ""),
+          );
         }
       },
       error: function () {

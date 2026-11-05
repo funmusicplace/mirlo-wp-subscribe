@@ -57,12 +57,7 @@ class Mirlo_Shortcode {
             ? ' data-tier-ids="' . esc_attr( implode( ',', $tier_ids ) ) . '"'
             : '';
 
-        // Mirlo needs a full URL, so turn a path on this site into one.
-        $success_url = trim( $atts['success_url'] );
-        if ( 0 === strpos( $success_url, '/' ) && 0 !== strpos( $success_url, '//' ) ) {
-            $success_url = home_url( $success_url );
-        }
-        $success_url      = '' !== $success_url ? esc_url_raw( $success_url ) : '';
+        $success_url      = Mirlo_API::return_url( $atts['success_url'] );
         $success_url_attr = $success_url ? ' data-success-url="' . esc_attr( $success_url ) . '"' : '';
 
         return sprintf(
@@ -100,7 +95,7 @@ class Mirlo_Shortcode {
         $artist_data = $api->get_artist( $atts['artist'] );
 
         if ( isset( $artist_data['error'] ) ) {
-            return '<p class="mirlo-error">Error: ' . esc_html( $artist_data['error'] ) . '</p>';
+            return '<p class="mirlo-error">' . esc_html( self::load_error( $artist_data['error'] ) ) . '</p>';
         }
 
         if ( empty( $artist_data['result']['id'] ) ) {
@@ -117,12 +112,16 @@ class Mirlo_Shortcode {
             foreach ( $tiers as $tier ) {
                 $tiers_by_id[ (int) $tier['id'] ] = $tier;
             }
-            $tiers = array_values( array_filter( array_map(
-                function ( $id ) use ( $tiers_by_id ) {
-                    return $tiers_by_id[ $id ] ?? null;
-                },
-                $tier_ids
-            ) ) );
+            $tiers = array_values(
+                array_filter(
+                    array_map(
+                        function ( $id ) use ( $tiers_by_id ) {
+                            return $tiers_by_id[ $id ] ?? null;
+                        },
+                        $tier_ids
+                    )
+                )
+            );
         }
 
         if ( empty( $tiers ) ) {
@@ -212,8 +211,8 @@ class Mirlo_Shortcode {
         // resolve_color_value() converts preset references to CSS custom properties.
         if ( function_exists( 'wp_get_global_styles' ) ) {
             $global     = wp_get_global_styles();
-            $foreground = $this->resolve_color_value( $global['color']['text']                             ?? null );
-            $background = $this->resolve_color_value( $global['color']['background']                       ?? null );
+            $foreground = $this->resolve_color_value( $global['color']['text'] ?? null );
+            $background = $this->resolve_color_value( $global['color']['background'] ?? null );
             $accent     = $this->resolve_color_value( $global['elements']['button']['color']['background'] ?? null );
         }
 
@@ -242,9 +241,12 @@ class Mirlo_Shortcode {
         }
 
         $vars = array();
-        if ( $accent )     { $vars[] = '--mirlo-accent: '     . $accent     . ';'; }
-        if ( $foreground ) { $vars[] = '--mirlo-foreground: ' . $foreground . ';'; }
-        if ( $background ) { $vars[] = '--mirlo-background: ' . $background . ';'; }
+        if ( $accent ) {
+            $vars[] = '--mirlo-accent: ' . $accent . ';'; }
+        if ( $foreground ) {
+            $vars[] = '--mirlo-foreground: ' . $foreground . ';'; }
+        if ( $background ) {
+            $vars[] = '--mirlo-background: ' . $background . ';'; }
 
         if ( empty( $vars ) ) {
             return '';
@@ -264,7 +266,18 @@ class Mirlo_Shortcode {
             $slug    = sanitize_key( $m[2] );
             return 'var(--wp--preset--' . $feature . '--' . $slug . ')';
         }
-        return sanitize_hex_color( $value ) ?: null;
+        $hex = sanitize_hex_color( $value );
+        return $hex ? $hex : null;
+    }
+
+    /**
+     * What to show when the tiers can't be loaded. Mirlo's own error is only
+     * shown to people who run the site.
+     */
+    private static function load_error( $error ) {
+        return current_user_can( 'manage_options' )
+            ? 'Couldn\'t load the tiers from Mirlo: ' . $error
+            : 'Couldn\'t load the subscription tiers. Please try again later.';
     }
 
     public function ajax_fetch_artist() {
@@ -282,7 +295,7 @@ class Mirlo_Shortcode {
         $artist_data = $api->get_artist( $artist_slug );
 
         if ( isset( $artist_data['error'] ) ) {
-            wp_send_json_error( $artist_data['error'] );
+            wp_send_json_error( self::load_error( $artist_data['error'] ) );
         }
 
         if ( empty( $artist_data ) || ! isset( $artist_data['result']['id'] ) ) {
@@ -303,9 +316,12 @@ class Mirlo_Shortcode {
     public function ajax_purchase() {
         check_ajax_referer( 'mirlo_nonce_v2', 'nonce' );
 
-        $artist_id   = isset( $_POST['artist_id'] )   ? intval( $_POST['artist_id'] )   : 0;
-        $tier_id     = isset( $_POST['tier_id'] )     ? intval( $_POST['tier_id'] )     : 0;
-        $success_url = isset( $_POST['success_url'] ) ? esc_url_raw( wp_unslash( $_POST['success_url'] ) ) : '';
+        $artist_id = isset( $_POST['artist_id'] ) ? intval( $_POST['artist_id'] ) : 0;
+        $tier_id   = isset( $_POST['tier_id'] ) ? intval( $_POST['tier_id'] ) : 0;
+        // Sent by the browser, so check it again: only this site or Mirlo.
+        // return_url() cleans it with esc_url_raw().
+        // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized
+        $success_url = isset( $_POST['success_url'] ) ? Mirlo_API::return_url( wp_unslash( $_POST['success_url'] ) ) : '';
 
         if ( ! $artist_id || ! $tier_id ) {
             wp_send_json_error( 'Missing artist or tier.' );
@@ -315,7 +331,13 @@ class Mirlo_Shortcode {
         $result = $api->purchase_subscription( $artist_id, $tier_id, $success_url );
 
         if ( isset( $result['error'] ) || empty( $result['redirectUrl'] ) ) {
-            wp_send_json_error( $result );
+            wp_send_json_error(
+                array(
+                    'message' => 'Couldn\'t start the checkout. Please try again.',
+                    // Mirlo's own error, only for people who run the site.
+                    'detail'  => current_user_can( 'manage_options' ) ? ( $result['error'] ?? 'No redirectUrl' ) : null,
+                )
+            );
         }
 
         wp_send_json_success( array( 'redirectUrl' => $result['redirectUrl'] ) );

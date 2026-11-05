@@ -132,7 +132,7 @@ class Mirlo_OAuth {
         if ( ! is_array( $tokens ) || empty( $tokens['access_token'] ) ) {
             return null;
         }
-        if ( $tokens['instance'] !== self::instance_url() || $tokens['client_id'] !== self::client_id() ) {
+        if ( self::instance_url() !== $tokens['instance'] || self::client_id() !== $tokens['client_id'] ) {
             return null;
         }
         return $tokens;
@@ -345,7 +345,10 @@ class Mirlo_OAuth {
     private static function fetch_account( $access_token ) {
         $metadata = self::discovery();
         if ( is_wp_error( $metadata ) || empty( $metadata['userinfo_endpoint'] ) ) {
-            return array( 'sub' => '', 'name' => '' );
+            return array(
+				'sub'  => '',
+				'name' => '',
+            );
         }
         $response = wp_remote_get(
             $metadata['userinfo_endpoint'],
@@ -354,7 +357,7 @@ class Mirlo_OAuth {
                 'headers' => array( 'Authorization' => 'Bearer ' . $access_token ),
             )
         );
-        $body = is_wp_error( $response ) ? null : json_decode( wp_remote_retrieve_body( $response ), true );
+        $body     = is_wp_error( $response ) ? null : json_decode( wp_remote_retrieve_body( $response ), true );
         return array(
             'sub'  => (string) ( $body['sub'] ?? '' ),
             'name' => (string) ( $body['name'] ?? '' ),
@@ -362,6 +365,8 @@ class Mirlo_OAuth {
     }
 
     private static function base64url( $bytes ) {
+        // Base64url, as PKCE needs.
+        // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode
         return rtrim( strtr( base64_encode( $bytes ), '+/', '-_' ), '=' );
     }
 
@@ -416,10 +421,16 @@ class Mirlo_OAuth {
             $metadata['authorization_endpoint']
         );
 
-        wp_redirect( $url );
+        // To Mirlo's sign-in page, on another site by design.
+        wp_redirect( $url ); // phpcs:ignore WordPress.Security.SafeRedirect.wp_redirect_wp_redirect
         exit;
     }
 
+    /*
+     * Mirlo sends the admin back here. The OAuth state, saved for the admin
+     * who started the sign-in, does the job of a nonce.
+     */
+    // phpcs:disable WordPress.Security.NonceVerification.Recommended
     public function handle_callback() {
         if ( ! current_user_can( 'manage_options' ) ) {
             wp_die( 'Insufficient permissions.' );
@@ -427,12 +438,12 @@ class Mirlo_OAuth {
 
         $state = sanitize_text_field( wp_unslash( $_GET['state'] ?? '' ) );
         $flow  = $state ? get_transient( self::FLOW_TRANSIENT . $state ) : false;
-        if ( ! is_array( $flow ) || (int) $flow['user_id'] !== get_current_user_id() ) {
+        if ( ! is_array( $flow ) || get_current_user_id() !== (int) $flow['user_id'] ) {
             $this->back_to_settings( 'error', 'The Mirlo sign-in expired or didn\'t start here. Try connecting again.' );
         }
         delete_transient( self::FLOW_TRANSIENT . $state );
 
-        if ( $flow['instance'] !== self::instance_url() || $flow['client_id'] !== self::client_id() ) {
+        if ( self::instance_url() !== $flow['instance'] || self::client_id() !== $flow['client_id'] ) {
             $this->back_to_settings( 'error', 'The Mirlo settings changed during sign-in. Try connecting again.' );
         }
 
@@ -474,6 +485,7 @@ class Mirlo_OAuth {
 
         $this->back_to_settings( 'success', 'Connected to Mirlo.' );
     }
+    // phpcs:enable WordPress.Security.NonceVerification.Recommended
 
     public function handle_disconnect() {
         check_admin_referer( 'mirlo_oauth_disconnect' );
@@ -507,7 +519,10 @@ class Mirlo_OAuth {
     private function back_to_settings( $type, $message ) {
         set_transient(
             'mirlo_oauth_result_' . get_current_user_id(),
-            array( 'type' => $type, 'message' => $message ),
+            array(
+				'type'    => $type,
+				'message' => $message,
+            ),
             MINUTE_IN_SECONDS
         );
         wp_safe_redirect( admin_url( 'options-general.php?page=mirlo-subscribe' ) );
@@ -531,7 +546,7 @@ class Mirlo_OAuth {
     }
 
     public function serve_client_metadata() {
-        $name = wp_strip_all_tags( get_bloginfo( 'name' ) );
+        $name     = wp_strip_all_tags( get_bloginfo( 'name' ) );
         $document = array(
             'client_id'                  => self::metadata_document_url(),
             'client_name'                => mb_substr( $name ? $name : wp_parse_url( home_url(), PHP_URL_HOST ), 0, 100 ),

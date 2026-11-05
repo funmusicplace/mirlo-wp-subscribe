@@ -1,6 +1,9 @@
 <?php
 
 class Mirlo_API {
+    const ARTIST_CACHE = 'mirlo_artist_';
+    const ARTIST_TTL   = 15 * MINUTE_IN_SECONDS;
+
     private $base_url;
     private $api_key;
 
@@ -9,8 +12,48 @@ class Mirlo_API {
         $this->api_key  = get_option( 'mirlo_api_key', '' );
     }
 
-    public function get_artist( $url_slug ) {
-        return $this->make_request( '/artists/' . rawurlencode( $url_slug ) );
+    /**
+     * An artist's public details, including their subscription tiers. Kept
+     * for 15 minutes, so pop-ups don't ask Mirlo every time they open.
+     *
+     * @param bool $fresh Ask Mirlo even if there's a saved copy.
+     */
+    public function get_artist( $url_slug, $fresh = false ) {
+        $key = self::ARTIST_CACHE . md5( $this->base_url . '|' . $url_slug );
+        if ( ! $fresh ) {
+            $cached = get_transient( $key );
+            if ( is_array( $cached ) ) {
+                return $cached;
+            }
+        }
+        $result = $this->make_request( '/artists/' . rawurlencode( $url_slug ) );
+        if ( ! isset( $result['error'] ) && isset( $result['result']['id'] ) ) {
+            set_transient( $key, $result, self::ARTIST_TTL );
+        }
+        return $result;
+    }
+
+    /**
+     * Where a buyer may be sent after paying: a page on this site or on
+     * Mirlo. A path such as /thanks becomes a full address on this site.
+     *
+     * @return string The full address, or '' if it's anywhere else.
+     */
+    public static function return_url( $url ) {
+        $url = trim( (string) $url );
+        if ( '' === $url ) {
+            return '';
+        }
+        if ( 0 === strpos( $url, '/' ) && 0 !== strpos( $url, '//' ) ) {
+            $url = home_url( $url );
+        }
+        $url     = esc_url_raw( $url, array( 'http', 'https' ) );
+        $host    = strtolower( (string) wp_parse_url( $url, PHP_URL_HOST ) );
+        $allowed = array(
+            strtolower( (string) wp_parse_url( home_url(), PHP_URL_HOST ) ),
+            strtolower( (string) wp_parse_url( Mirlo_OAuth::instance_url(), PHP_URL_HOST ) ),
+        );
+        return '' !== $host && in_array( $host, $allowed, true ) ? $url : '';
     }
 
     public function get_subscription_tiers( $artist_id ) {
@@ -111,7 +154,7 @@ class Mirlo_API {
         }
 
         $code = wp_remote_retrieve_response_code( $response );
-        if ( $code !== 200 ) {
+        if ( 200 !== $code ) {
             $body = wp_remote_retrieve_body( $response );
             return array(
                 'error'        => "HTTP {$code}: {$body}",

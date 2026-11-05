@@ -20,6 +20,7 @@ jobs:
           mkdir -p dist/mirlo-subscribe
           rsync -r --exclude='.git' --exclude='.github' --exclude='dist' --exclude='*.md' \
             --exclude='dev' --exclude='package.json' --exclude='node_modules' \
+            --exclude='vendor' --exclude='composer.json' --exclude='composer.lock' --exclude='phpcs.xml.dist' --exclude='.gitignore' \
             . dist/mirlo-subscribe/
           cd dist
           zip -r mirlo-subscribe-${{ steps.version.outputs.version }}.zip mirlo-subscribe/

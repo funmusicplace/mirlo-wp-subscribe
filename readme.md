@@ -4,7 +4,7 @@ Contributors: Mirlo Code Circle
 Tags: mirlo, music, subscriptions, modal
 Requires at least: 6.0
 Tested up to: 6.5
-Stable tag: 1.3.0
+Stable tag: 1.3.1
 License: AGPLv3 or later
 
 Add Mirlo artist subscription modals to any post or page via shortcode.
@@ -30,7 +30,8 @@ Both take `color="#hex"` and `tier_ids="12,34"` to show only those tiers, in
 that order.
 
 `success_url` on `[mirlo_pop_up]` is where buyers land after paying. It can be
-a full URL or a path on this site, such as `/thanks`. It needs an **API Key**
+a path on this site, such as `/thanks`, or a full URL on this site or on
+Mirlo; any other address is ignored. It needs an **API Key**
 in the settings (ask hi@mirlo.space): without one, Mirlo only lets buyers
 return to Mirlo itself. The original `[mirlo_subscribe]` and `[mirlo_tiers]` shortcodes
 still work and show the same as these.
@@ -106,7 +107,11 @@ The site talks to a fake Mirlo instead of the real one ([dev/mu-plugins/mock-mir
 - To change what the preview page shows, edit [dev/preview-page.html](dev/preview-page.html).
 - To connect to a real Mirlo instead, set **Mirlo Instance** to it and save. That clears the dev **Client ID**. The dev site isn't on HTTPS, so it can't identify itself with its metadata document. Instead, register a client on that instance under **Admin → API clients**: give it the redirect URI `http://127.0.0.1:9400/wp-admin/admin-post.php?action=mirlo_oauth_callback`, leave **Server-side app** unticked, and enter its number as **Client ID**.
 
-Nothing in `dev/` or `package.json` is included in the release zip.
+`npm test` runs end-to-end checks against the fake Mirlo in a throwaway WordPress. It needs Docker, and prints what it finds for you to read ([dev/tests/run.sh](dev/tests/run.sh)).
+
+`composer install` then `composer lint` checks the PHP against the WordPress coding standards ([phpcs.xml.dist](phpcs.xml.dist)); `composer lint:fix` fixes what it can.
+
+Nothing in `dev/`, `package.json`, `composer.json` or `phpcs.xml.dist` is included in the release zip.
 
 ## Changelog
 
@@ -114,3 +119,4 @@ Nothing in `dev/` or `package.json` is included in the release zip.
 1.1.0 Add short code for displaying tiers
 1.2.0 Connect a Mirlo account over OAuth to read subscribers, renewed daily, with a warning on every admin page if Mirlo ends it; choose the Mirlo instance; deleting the plugin removes its settings and disconnects from Mirlo; `[mirlo_subscribe]` and `[mirlo_tiers]` now use the same checkout as `[mirlo_pop_up]` and `[mirlo_tier_list]`, since Mirlo removed the endpoint they used
 1.3.0 `Mirlo_API::purchase_subscription()` takes an optional monthly amount, for tiers where people choose what they pay
+1.3.1 `success_url` must be a page on this site or on Mirlo, and is checked again when someone checks out; artist details are kept for 15 minutes; visitors see a short message instead of Mirlo's raw error when tiers can't load or checkout fails (admins still see the details); `Mirlo_API::return_url()` and the artist cache are public, for add-ons

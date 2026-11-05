@@ -9,6 +9,7 @@ if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {
 }
 
 require_once __DIR__ . '/includes/class-mirlo-oauth.php';
+require_once __DIR__ . '/includes/class-mirlo-api.php';
 
 function mirlo_subscribe_uninstall_site() {
     global $wpdb;
@@ -31,20 +32,27 @@ function mirlo_subscribe_uninstall_site() {
         delete_option( $option );
     }
 
-    // Discovery cache, sign-ins in progress and settings page notices. With a
+    // Discovery and artist caches, sign-ins in progress and settings page notices. With a
     // persistent object cache these aren't in the database, but they expire
     // within a day.
     $wpdb->query(
         $wpdb->prepare(
-            "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s OR option_name LIKE %s",
+            "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s OR option_name LIKE %s OR option_name LIKE %s OR option_name LIKE %s",
             $wpdb->esc_like( '_transient_mirlo_oauth_' ) . '%',
-            $wpdb->esc_like( '_transient_timeout_mirlo_oauth_' ) . '%'
+            $wpdb->esc_like( '_transient_timeout_mirlo_oauth_' ) . '%',
+            $wpdb->esc_like( '_transient_' . Mirlo_API::ARTIST_CACHE ) . '%',
+            $wpdb->esc_like( '_transient_timeout_' . Mirlo_API::ARTIST_CACHE ) . '%'
         )
     );
 }
 
 if ( is_multisite() ) {
-    foreach ( get_sites( array( 'fields' => 'ids', 'number' => 0 ) ) as $site_id ) {
+    foreach ( get_sites(
+        array(
+			'fields' => 'ids',
+			'number' => 0,
+        )
+    ) as $site_id ) {
         switch_to_blog( $site_id );
         mirlo_subscribe_uninstall_site();
         restore_current_blog();

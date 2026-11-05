@@ -1,0 +1,35 @@
+<?xml version="1.0"?>
+<ruleset name="Mirlo Subscribe">
+	<description>WordPress coding standards, with this plugin's 4-space indentation.</description>
+
+	<file>.</file>
+	<exclude-pattern>/dev/*</exclude-pattern>
+	<exclude-pattern>/vendor/*</exclude-pattern>
+	<exclude-pattern>/node_modules/*</exclude-pattern>
+	<arg name="extensions" value="php"/>
+	<arg value="sp"/>
+
+	<config name="testVersion" value="7.4-"/>
+	<config name="minimum_wp_version" value="6.0"/>
+	<rule ref="PHPCompatibilityWP"/>
+
+	<rule ref="WordPress-Extra">
+		<!-- The plugin indents with 4 spaces rather than tabs. -->
+		<exclude name="Generic.WhiteSpace.DisallowSpaceIndent"/>
+		<exclude name="Universal.WhiteSpace.PrecisionAlignment"/>
+	</rule>
+	<rule ref="Generic.WhiteSpace.ScopeIndent">
+		<properties>
+			<property name="indent" value="4"/>
+			<property name="tabIndent" value="false"/>
+		</properties>
+	</rule>
+	<rule ref="WordPress.Security"/>
+	<rule ref="WordPress.WP.I18n">
+		<properties>
+			<property name="text_domain" type="array">
+				<element value="mirlo-subscribe"/>
+			</property>
+		</properties>
+	</rule>
+</ruleset>
