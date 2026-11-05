@@ -1,11 +1,12 @@
 <?php
 
 class Mirlo_API {
-    private $base_url = 'https://mirlo.space/v1';
+    private $base_url;
     private $api_key;
 
     public function __construct() {
-        $this->api_key = get_option( 'mirlo_api_key', '' );
+        $this->base_url = Mirlo_OAuth::instance_url() . '/v1';
+        $this->api_key  = get_option( 'mirlo_api_key', '' );
     }
 
     public function get_artist( $url_slug ) {
@@ -16,18 +17,9 @@ class Mirlo_API {
         return $this->make_request( '/artists/' . intval( $artist_id ) . '/subscriptionTiers' );
     }
 
-    public function subscribe( $artist_id, $tier_id ) {
-        return $this->make_request(
-            '/artists/' . intval( $artist_id ) . '/subscribe',
-            'POST',
-            array( 'tierId' => intval( $tier_id ) )
-        );
-    }
-
     /**
-     * Unified purchase endpoint (replacement for subscribe() above).
-     * Kept separate from subscribe() so the new checkout flow can be
-     * exercised via [mirlo_subscribe_v2] without touching the existing shortcode.
+     * Start a hosted checkout for a subscription tier. Mirlo answers with a
+     * redirectUrl to send the buyer to.
      */
     public function purchase_subscription( $artist_id, $tier_id, $success_url = null ) {
         $body = array(
@@ -48,7 +40,45 @@ class Mirlo_API {
         return $this->make_request( '/purchase', 'POST', $body );
     }
 
-    private function make_request( $endpoint, $method = 'GET', $body = null ) {
+    /**
+     * The artist's current subscribers, as the connected Mirlo account.
+     * Needs the site connected with the subscribers:read scope, by an
+     * account that can edit the artist.
+     *
+     * @param string    $artist Artist URL slug or ID.
+     * @param bool|null $paid   true for paying subscribers only, false for
+     *                          followers only, null for both.
+     */
+    public function get_subscribers( $artist, $paid = null ) {
+        $endpoint = '/manage/artists/' . rawurlencode( $artist ) . '/subscribers/active';
+        if ( null !== $paid ) {
+            $endpoint .= '?paid=' . ( $paid ? 'true' : 'false' );
+        }
+        return $this->make_authenticated_request( $endpoint );
+    }
+
+    /**
+     * Make a request with the connected account's bearer token, refreshing
+     * it once if Mirlo says it's no longer valid.
+     */
+    private function make_authenticated_request( $endpoint, $method = 'GET', $body = null ) {
+        $token = Mirlo_OAuth::get_access_token();
+        if ( is_wp_error( $token ) ) {
+            return array( 'error' => $token->get_error_message() );
+        }
+
+        $result = $this->make_request( $endpoint, $method, $body, $token );
+        if ( isset( $result['error_status'] ) && 401 === $result['error_status'] ) {
+            $token = Mirlo_OAuth::get_access_token( $token );
+            if ( is_wp_error( $token ) ) {
+                return array( 'error' => $token->get_error_message() );
+            }
+            $result = $this->make_request( $endpoint, $method, $body, $token );
+        }
+        return $result;
+    }
+
+    private function make_request( $endpoint, $method = 'GET', $body = null, $access_token = null ) {
         $url  = $this->base_url . $endpoint;
         $args = array(
             'method'  => $method,
@@ -56,7 +86,10 @@ class Mirlo_API {
             'timeout' => 10,
         );
 
-        if ( $this->api_key ) {
+        // A bearer token replaces the API key.
+        if ( $access_token ) {
+            $args['headers']['Authorization'] = 'Bearer ' . $access_token;
+        } elseif ( $this->api_key ) {
             $args['headers']['mirlo-api-key'] = $this->api_key;
         }
 
@@ -73,7 +106,10 @@ class Mirlo_API {
         $code = wp_remote_retrieve_response_code( $response );
         if ( $code !== 200 ) {
             $body = wp_remote_retrieve_body( $response );
-            return array( 'error' => "HTTP {$code}: {$body}" );
+            return array(
+                'error'        => "HTTP {$code}: {$body}",
+                'error_status' => $code,
+            );
         }
 
         return json_decode( wp_remote_retrieve_body( $response ), true );

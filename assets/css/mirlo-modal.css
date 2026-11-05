@@ -10,7 +10,6 @@
 }
 
 /* ── Button ── */
-.mirlo-subscribe-btn,
 .mirlo-subscribe-btn-v2 {
   background-color: var(--mirlo-accent, #1a73e8);
   color: #fff;
@@ -23,7 +22,6 @@
   transition: filter 0.2s;
 }
 
-.mirlo-subscribe-btn:hover,
 .mirlo-subscribe-btn-v2:hover {
   filter: brightness(0.9);
 }
@@ -143,7 +141,6 @@
   gap: 12px;
 }
 
-.mirlo-tier,
 .mirlo-tier-v2 {
   border: 2px solid currentColor;
   opacity: 0.8;
@@ -161,7 +158,6 @@
     background 0.2s;
 }
 
-.mirlo-tier:hover,
 .mirlo-tier-v2:hover {
   opacity: 1;
   background: color-mix(in srgb, var(--mirlo-accent, #1a73e8) 8%, transparent);
