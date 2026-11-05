@@ -20,17 +20,24 @@ class Mirlo_API {
     /**
      * Start a hosted checkout for a subscription tier. Mirlo answers with a
      * redirectUrl to send the buyer to.
+     *
+     * @param int|null $amount Monthly amount in cents, for tiers that let
+     *                         people choose what they pay. Mirlo checks it
+     *                         against the tier's minimum and maximum. Leave
+     *                         out to pay the tier's price.
      */
-    public function purchase_subscription( $artist_id, $tier_id, $success_url = null ) {
+    public function purchase_subscription( $artist_id, $tier_id, $success_url = null, $amount = null ) {
+        $item = array(
+            'type'   => 'subscription',
+            'tierId' => intval( $tier_id ),
+        );
+        if ( null !== $amount ) {
+            $item['amount'] = intval( $amount );
+        }
         $body = array(
             'artistId' => intval( $artist_id ),
             'hosted'   => true,
-            'items'    => array(
-                array(
-                    'type'   => 'subscription',
-                    'tierId' => intval( $tier_id ),
-                ),
-            ),
+            'items'    => array( $item ),
         );
 
         if ( $success_url ) {

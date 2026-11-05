@@ -11,6 +11,9 @@
  *   no-tiers        the artist has no subscription tiers
  *   slow            Mirlo takes 3 seconds to answer, to see loading states
  *   no-subscribers  the connected account's subscriber list is empty
+ *   pay-what-you-want  tiers where people choose what they pay, like
+ *                   Patchwork's: a member tier from $25 and an
+ *                   organization tier from $100, plus one fixed-price tier
  * Any other slug is a normal artist with four tiers and a few subscribers.
  *
  * Like the real Mirlo, checkout with a success_url on this site only works
@@ -18,6 +21,10 @@
  *
  * Visit /?mock_mirlo=end-connection to pretend Mirlo ended the connection,
  * to see how the plugin reacts. Connecting again clears it.
+ *
+ * To make subscribers leave, list their Mirlo user IDs (501 to 507) in the
+ * mock_mirlo_left option, e.g. `wp option update mock_mirlo_left '[502]'
+ * --format=json`. Delete the option to bring them back.
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -120,7 +127,11 @@ function mock_mirlo_route( $method, $path, $query, $args ) {
         if ( in_array( $slug, array( 'missing', 'broken' ), true ) ) {
             return mock_mirlo_artist_error( $slug );
         }
-        $results = 'no-subscribers' === $slug ? array() : mock_mirlo_subscribers();
+        $results = 'no-subscribers' === $slug ? array() : mock_mirlo_subscribers( $slug );
+        $left    = array_map( 'intval', (array) get_option( 'mock_mirlo_left', array() ) );
+        $results = array_values( array_filter( $results, function ( $s ) use ( $left ) {
+            return ! in_array( $s['userId'], $left, true );
+        } ) );
         if ( isset( $query['paid'] ) ) {
             $paid    = 'true' === $query['paid'];
             $results = array_values( array_filter( $results, function ( $s ) use ( $paid ) {
@@ -156,8 +167,13 @@ function mock_mirlo_route( $method, $path, $query, $args ) {
                 return mock_mirlo_response( 400, array( 'error' => $error ) );
             }
         }
-        $tier = $body['items'][0]['tierId'] ?? 0;
-        return mock_mirlo_response( 200, array( 'redirectUrl' => mock_mirlo_checkout_url( $tier, $success_url ) ) );
+        $tier_id = (int) ( $body['items'][0]['tierId'] ?? 0 );
+        $amount  = $body['items'][0]['amount'] ?? null;
+        $error   = mock_mirlo_amount_error( $tier_id, $amount );
+        if ( $error ) {
+            return mock_mirlo_response( 400, array( 'error' => $error ) );
+        }
+        return mock_mirlo_response( 200, array( 'redirectUrl' => mock_mirlo_checkout_url( $tier_id, $success_url, $amount ) ) );
     }
 
     return mock_mirlo_response( 404, array( 'error' => "Mock Mirlo doesn't know $method $path" ) );
@@ -188,6 +204,31 @@ function mock_mirlo_success_url_error( $success_url, $api_key ) {
     return in_array( $target, $allowed, true ) ? null : 'successUrl origin is not allowed for this client';
 }
 
+/** Like Mirlo's resolveTierAndAmount. */
+function mock_mirlo_amount_error( $tier_id, $amount ) {
+    $tier = null;
+    foreach ( array_merge( mock_mirlo_tiers(), mock_mirlo_tiers( 'pay-what-you-want' ) ) as $candidate ) {
+        if ( $candidate['id'] === $tier_id ) {
+            $tier = $candidate;
+        }
+    }
+    if ( ! $tier ) {
+        return 'Subscription tier not found';
+    }
+    $price = (int) ( $tier['minAmount'] ?? 0 );
+    if ( null !== $amount && empty( $tier['allowVariable'] ) && (int) $amount !== $price ) {
+        return 'This subscription tier has a fixed price';
+    }
+    $amount = null === $amount ? $price : (int) $amount;
+    if ( $amount <= 0 ) {
+        return 'Subscription amount must be greater than 0';
+    }
+    if ( $amount < $price ) {
+        return "Subscription amount is below the tier's minimum";
+    }
+    return null;
+}
+
 function mock_mirlo_artist_error( $slug ) {
     return 'missing' === $slug
         ? mock_mirlo_response( 404, array( 'error' => 'Artist not found' ) )
@@ -209,20 +250,33 @@ function mock_mirlo_artist( $slug ) {
         'urlSlug'           => $slug,
         'avatar'            => array( 'sizes' => array( '300' => $avatar ) ),
         'user'              => array( 'currency' => 'usd' ),
-        'subscriptionTiers' => 'no-tiers' === $slug ? array() : mock_mirlo_tiers(),
+        'subscriptionTiers' => 'no-tiers' === $slug ? array() : mock_mirlo_tiers( $slug ),
     );
 }
 
-function mock_mirlo_tiers() {
+function mock_mirlo_tiers( $slug = '' ) {
+    if ( 'pay-what-you-want' === $slug ) {
+        return array(
+            array( 'id' => 1, 'name' => 'Follow', 'minAmount' => null, 'description' => 'Get news.', 'isDefaultTier' => true ),
+            array( 'id' => 11, 'name' => 'Member Subscription', 'minAmount' => 2500, 'currency' => 'usd', 'allowVariable' => true, 'collectAddress' => true, 'description' => 'Pay what you can.' ),
+            array( 'id' => 12, 'name' => 'Organization Subscription', 'minAmount' => 10000, 'currency' => 'usd', 'allowVariable' => true, 'description' => 'For organizations.' ),
+            array( 'id' => 13, 'name' => 'Organization: Make', 'minAmount' => 25000, 'currency' => 'usd', 'description' => 'A fixed price.' ),
+        );
+    }
     return array(
         array( 'id' => 1, 'name' => 'Follow', 'minAmount' => null, 'description' => 'Get news about new releases.', 'isDefaultTier' => true ),
-        array( 'id' => 2, 'name' => 'Supporter', 'minAmount' => 500, 'currency' => 'usd', 'description' => 'Every release, as it comes out.' ),
-        array( 'id' => 3, 'name' => 'Superfan', 'minAmount' => 1500, 'currency' => 'usd', 'description' => 'Everything in Supporter, plus a postcard from every tour and early access to tickets. This description is long on purpose, to see how the layout copes with a few lines of text.' ),
+        array( 'id' => 2, 'name' => 'Supporter', 'minAmount' => 500, 'currency' => 'usd', 'allowVariable' => true, 'collectAddress' => true, 'description' => 'Every release, as it comes out.' ),
+        array( 'id' => 3, 'name' => 'Superfan', 'minAmount' => 1500, 'currency' => 'usd', 'allowVariable' => true, 'collectAddress' => true, 'description' => 'Everything in Supporter, plus a postcard from every tour and early access to tickets. This description is long on purpose, to see how the layout copes with a few lines of text.' ),
         array( 'id' => 4, 'name' => 'Euro tier', 'minAmount' => 1000, 'currency' => 'eur', 'description' => '' ),
     );
 }
 
-function mock_mirlo_subscribers() {
+function mock_mirlo_subscribers( $slug = '' ) {
+    // The pay-what-you-want artist's members all share one tier, at
+    // different amounts. Index: the other artist's tier => this one's.
+    $pwyw = 'pay-what-you-want' === $slug;
+    $pwyw_tiers   = array( 1 => 1, 2 => 11, 3 => 11, 4 => 12 );
+    $pwyw_amounts = array( 2500, 4000, 6000, 15000, 0, 0, 30000 );
     $people = array(
         array( 'Ada Example', 3, 'active' ),
         array( 'Bo Placeholder', 2, 'active' ),
@@ -233,23 +287,37 @@ function mock_mirlo_subscribers() {
         array( 'Gus <b>Escaped</b> & Co', 3, 'active' ),
     );
     $tiers = array();
-    foreach ( mock_mirlo_tiers() as $tier ) {
+    foreach ( mock_mirlo_tiers( $slug ) as $tier ) {
         $tiers[ $tier['id'] ] = $tier;
     }
     $results = array();
     foreach ( $people as $i => list( $name, $tier_id, $status ) ) {
+        $tier_id   = $pwyw ? $pwyw_tiers[ $tier_id ] : $tier_id;
         $tier      = $tiers[ $tier_id ];
         $results[] = array(
             'id'               => 100 + $i,
+            'userId'           => 501 + $i,
             'email'            => 'person' . ( $i + 1 ) . '@example.com',
             'name'             => $name,
             'tierId'           => $tier_id,
             'tierName'         => $tier['name'],
             'paid'             => null !== $tier['minAmount'],
-            'amount'           => (int) $tier['minAmount'],
+            'amount'           => $pwyw ? $pwyw_amounts[ $i ] : (int) $tier['minAmount'],
             'currency'         => $tier['currency'] ?? 'usd',
             'status'           => $status,
             'currentPeriodEnd' => gmdate( 'c', strtotime( '+' . ( 3 + $i * 4 ) . ' days' ) ),
+            // Like Mirlo, only for tiers that collect one.
+            'shippingAddress'  => empty( $tier['collectAddress'] ) ? null : array(
+                'name'    => $name,
+                'address' => array(
+                    'line1'       => ( 100 + $i ) . ' Example Street',
+                    'line2'       => '',
+                    'city'        => 'Washington',
+                    'state'       => 'DC',
+                    'postal_code' => '20001',
+                    'country'     => 'US',
+                ),
+            ),
             'createdAt'        => gmdate( 'c', strtotime( '-' . ( 30 + $i * 45 ) . ' days' ) ),
             'updatedAt'        => gmdate( 'c', strtotime( '-' . ( 1 + $i ) . ' days' ) ),
         );
@@ -257,11 +325,12 @@ function mock_mirlo_subscribers() {
     return $results;
 }
 
-function mock_mirlo_checkout_url( $tier_id, $success_url ) {
+function mock_mirlo_checkout_url( $tier_id, $success_url, $amount = null ) {
     return add_query_arg(
         array(
             'mock_mirlo' => 'checkout',
             'tier'       => (int) $tier_id,
+            'amount'     => null === $amount ? '' : (int) $amount,
             'success'    => rawurlencode( $success_url ),
         ),
         home_url( '/' )
@@ -327,8 +396,9 @@ function mock_mirlo_checkout_page() {
     mock_mirlo_page(
         'Mock checkout',
         sprintf(
-            '<p>On the real site this would be Stripe checkout for tier <strong>%d</strong>.</p><p>%s<a class="btn secondary" href="javascript:history.back()">Back</a></p>',
+            '<p>On the real site this would be Stripe checkout for tier <strong>%d</strong>%s.</p><p>%s<a class="btn secondary" href="javascript:history.back()">Back</a></p>',
             (int) ( $_GET['tier'] ?? 0 ),
+            '' !== ( $_GET['amount'] ?? '' ) ? sprintf( ' at <strong>%s</strong> a month', esc_html( number_format( (int) $_GET['amount'] / 100, 2 ) ) ) : '',
             $success ? '<a class="btn" href="' . $success . '">Pay (go to success URL)</a> ' : ''
         )
     );
