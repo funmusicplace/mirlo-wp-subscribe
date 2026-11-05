@@ -4,7 +4,7 @@ Contributors: Mirlo Code Circle
 Tags: mirlo, music, subscriptions, modal
 Requires at least: 6.0
 Tested up to: 6.5
-Stable tag: 1.2.0
+Stable tag: 1.3.0
 License: AGPLv3 or later
 
 Add Mirlo artist subscription modals to any post or page via shortcode.
@@ -113,3 +113,4 @@ Nothing in `dev/` or `package.json` is included in the release zip.
 1.0.0 Initial release
 1.1.0 Add short code for displaying tiers
 1.2.0 Connect a Mirlo account over OAuth to read subscribers, renewed daily, with a warning on every admin page if Mirlo ends it; choose the Mirlo instance; deleting the plugin removes its settings and disconnects from Mirlo; `[mirlo_subscribe]` and `[mirlo_tiers]` now use the same checkout as `[mirlo_pop_up]` and `[mirlo_tier_list]`, since Mirlo removed the endpoint they used
+1.3.0 `Mirlo_API::purchase_subscription()` takes an optional monthly amount, for tiers where people choose what they pay
