@@ -14,12 +14,60 @@ class Mirlo_OAuth {
     const FLOW_TRANSIENT   = 'mirlo_oauth_flow_';
     const DISCOVERY_TTL    = DAY_IN_SECONDS;
     const EXPIRY_LEEWAY    = 60;
+    const KEEPALIVE_HOOK   = 'mirlo_oauth_keepalive';
 
     public function __construct() {
         add_action( 'admin_post_mirlo_oauth_connect', array( $this, 'handle_connect' ) );
         add_action( 'admin_post_mirlo_oauth_callback', array( $this, 'handle_callback' ) );
         add_action( 'admin_post_mirlo_oauth_disconnect', array( $this, 'handle_disconnect' ) );
         add_action( 'rest_api_init', array( $this, 'register_routes' ) );
+
+        add_action( self::KEEPALIVE_HOOK, array( __CLASS__, 'keep_alive' ) );
+        add_action( 'mirlo_oauth_connected', array( __CLASS__, 'schedule_keep_alive' ) );
+        add_action( 'mirlo_oauth_disconnected', array( __CLASS__, 'unschedule_keep_alive' ) );
+        // Catches connections made before this existed, or after the plugin
+        // was deactivated and activated again. Admin only, so front-end
+        // requests don't pay for the check.
+        add_action( 'admin_init', array( __CLASS__, 'sync_keep_alive_schedule' ) );
+    }
+
+    /* ------------------------------------------------------------------
+     * Keeping the connection alive
+     *
+     * Mirlo's refresh tokens expire after 30 days unused. Nothing else uses
+     * the connection on a schedule, so refresh once a day. WP-Cron runs on
+     * page visits, so a site that gets a visit a day needs no real cron job.
+     * This also finds out within a day when Mirlo has ended the connection.
+     * ------------------------------------------------------------------ */
+
+    public static function schedule_keep_alive() {
+        if ( ! wp_next_scheduled( self::KEEPALIVE_HOOK ) ) {
+            wp_schedule_event( time() + HOUR_IN_SECONDS, 'daily', self::KEEPALIVE_HOOK );
+        }
+    }
+
+    public static function unschedule_keep_alive() {
+        wp_clear_scheduled_hook( self::KEEPALIVE_HOOK );
+    }
+
+    public static function sync_keep_alive_schedule() {
+        if ( self::is_connected() ) {
+            self::schedule_keep_alive();
+        } elseif ( wp_next_scheduled( self::KEEPALIVE_HOOK ) ) {
+            self::unschedule_keep_alive();
+        }
+    }
+
+    public static function keep_alive() {
+        if ( ! self::is_connected() ) {
+            self::unschedule_keep_alive();
+            return;
+        }
+        // Access tokens last an hour, so a day later this nearly always
+        // refreshes, which gives a new refresh token with a fresh 30 days.
+        // If Mirlo has ended the connection, this drops it and shows the
+        // warning.
+        self::get_access_token();
     }
 
     /* ------------------------------------------------------------------
@@ -166,7 +214,7 @@ class Mirlo_OAuth {
         if ( is_wp_error( $response ) ) {
             self::release_lock();
             if ( 'invalid_grant' === $response->get_error_code() ) {
-                self::drop_connection( 'Mirlo no longer accepts this site\'s access. It may have been disconnected under Connected apps on Mirlo. Connect again to restore it.' );
+                self::drop_connection( 'Mirlo ended this site\'s connection. Connections last a year, and can also be ended under Connected apps on Mirlo. Connect again to restore it.' );
             }
             return $response;
         }
@@ -204,7 +252,7 @@ class Mirlo_OAuth {
             'instance'      => self::instance_url(),
             'client_id'     => self::client_id(),
             'access_token'  => $response['access_token'],
-            // Confidential clients may keep their refresh token.
+            // If Mirlo didn't rotate the refresh token, the old one stays valid.
             'refresh_token' => $response['refresh_token'] ?? $previous_refresh_token,
             'expires_at'    => time() + intval( $response['expires_in'] ?? HOUR_IN_SECONDS ),
             'scope'         => $response['scope'] ?? implode( ' ', self::scopes() ),

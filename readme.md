@@ -60,6 +60,11 @@ token that can only read subscribers, which you can revoke at any time under
 
 Use **Preview Subscribers** to check it works.
 
+The site renews its access once a day, so it stays connected as long as it
+gets a visit most days. Mirlo still ends every connection after a year, and
+you can end it sooner under **Connected apps** on Mirlo. When that happens, a
+warning appears on every admin page until you reconnect or dismiss it.
+
 ### For developers
 
     $api = new Mirlo_API();
@@ -97,6 +102,7 @@ The site talks to a fake Mirlo instead of the real one ([dev/mu-plugins/mock-mir
 - **Connect to Mirlo** in **Settings → Mirlo Subscribe** opens a fake approval page where you can allow or deny the connection.
 - Use the artist slugs `missing`, `broken`, `no-tiers`, `slow` and `no-subscribers` to see error, empty and loading states.
 - Checkout goes to a fake payment page.
+- Visit `/?mock_mirlo=end-connection` to pretend Mirlo ended the connection, and see the warning.
 - To change what the preview page shows, edit [dev/preview-page.html](dev/preview-page.html).
 - To connect to a real Mirlo instead, set **Mirlo Instance** to it and save. That clears the dev **Client ID**. The dev site isn't on HTTPS, so it can't identify itself with its metadata document. Instead, register a client on that instance under **Admin → API clients**: give it the redirect URI `http://127.0.0.1:9400/wp-admin/admin-post.php?action=mirlo_oauth_callback`, leave **Server-side app** unticked, and enter its number as **Client ID**.
 
@@ -106,4 +112,4 @@ Nothing in `dev/` or `package.json` is included in the release zip.
 
 1.0.0 Initial release
 1.1.0 Add short code for displaying tiers
-1.2.0 Connect a Mirlo account over OAuth to read subscribers; choose the Mirlo instance; deleting the plugin removes its settings and disconnects from Mirlo; `[mirlo_subscribe]` and `[mirlo_tiers]` now use the same checkout as `[mirlo_pop_up]` and `[mirlo_tier_list]`, since Mirlo removed the endpoint they used
+1.2.0 Connect a Mirlo account over OAuth to read subscribers, renewed daily, with a warning on every admin page if Mirlo ends it; choose the Mirlo instance; deleting the plugin removes its settings and disconnects from Mirlo; `[mirlo_subscribe]` and `[mirlo_tiers]` now use the same checkout as `[mirlo_pop_up]` and `[mirlo_tier_list]`, since Mirlo removed the endpoint they used

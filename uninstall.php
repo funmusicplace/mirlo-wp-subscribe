@@ -15,6 +15,7 @@ function mirlo_subscribe_uninstall_site() {
 
     // Needs the settings below, so revoke before deleting them.
     Mirlo_OAuth::revoke();
+    wp_clear_scheduled_hook( Mirlo_OAuth::KEEPALIVE_HOOK );
 
     $options = array(
         'mirlo_api_key',

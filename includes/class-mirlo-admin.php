@@ -7,6 +7,46 @@ class Mirlo_Admin {
         add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_admin_assets' ) );
         add_action( 'wp_ajax_mirlo_test_connection', array( $this, 'ajax_test_connection' ) );
         add_action( 'wp_ajax_mirlo_preview_subscribers', array( $this, 'ajax_preview_subscribers' ) );
+        add_action( 'admin_notices', array( $this, 'render_lost_connection_notice' ) );
+        add_action( 'admin_post_mirlo_oauth_dismiss_notice', array( $this, 'handle_dismiss_notice' ) );
+    }
+
+    /**
+     * When Mirlo ends the connection, say so on every admin page, not just
+     * this plugin's settings, until it's reconnected or dismissed.
+     */
+    public function render_lost_connection_notice() {
+        if ( ! current_user_can( 'manage_options' ) ) {
+            return;
+        }
+        $screen = get_current_screen();
+        if ( $screen && 'settings_page_mirlo-subscribe' === $screen->id ) {
+            return; // The settings page shows it in place.
+        }
+        $lost = get_option( Mirlo_OAuth::NOTICE_OPTION );
+        if ( ! $lost || Mirlo_OAuth::is_connected() ) {
+            return;
+        }
+        $dismiss = wp_nonce_url(
+            admin_url( 'admin-post.php?action=mirlo_oauth_dismiss_notice' ),
+            'mirlo_oauth_dismiss_notice'
+        );
+        printf(
+            '<div class="notice notice-warning"><p><strong>Mirlo Subscribe:</strong> %s</p><p><a class="button button-primary" href="%s">Reconnect to Mirlo</a> <a class="button" href="%s">Dismiss</a></p></div>',
+            esc_html( $lost ),
+            esc_url( admin_url( 'options-general.php?page=mirlo-subscribe' ) ),
+            esc_url( $dismiss )
+        );
+    }
+
+    public function handle_dismiss_notice() {
+        check_admin_referer( 'mirlo_oauth_dismiss_notice' );
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_die( 'Insufficient permissions.' );
+        }
+        delete_option( Mirlo_OAuth::NOTICE_OPTION );
+        wp_safe_redirect( wp_get_referer() ? wp_get_referer() : admin_url() );
+        exit;
     }
 
     public function add_menu_page() {

@@ -15,6 +15,9 @@
  *
  * Like the real Mirlo, checkout with a success_url on this site only works
  * once an API key is set in the settings. Any key will do here.
+ *
+ * Visit /?mock_mirlo=end-connection to pretend Mirlo ended the connection,
+ * to see how the plugin reacts. Connecting again clears it.
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -79,6 +82,12 @@ function mock_mirlo_route( $method, $path, $query, $args ) {
         );
     }
     if ( 'POST' === $method && '/auth/oidc/token' === $path ) {
+        $grant_type = is_array( $args['body'] ?? null ) ? ( $args['body']['grant_type'] ?? '' ) : '';
+        if ( 'authorization_code' === $grant_type ) {
+            delete_option( 'mock_mirlo_connection_ended' );
+        } elseif ( 'refresh_token' === $grant_type && get_option( 'mock_mirlo_connection_ended' ) ) {
+            return mock_mirlo_response( 400, array( 'error' => 'invalid_grant', 'error_description' => 'grant request is invalid' ) );
+        }
         return mock_mirlo_response(
             200,
             array(
@@ -274,6 +283,8 @@ add_action(
             mock_mirlo_authorize_page();
         } elseif ( 'checkout' === $page ) {
             mock_mirlo_checkout_page();
+        } elseif ( 'end-connection' === $page && current_user_can( 'manage_options' ) ) {
+            mock_mirlo_end_connection_page();
         }
     }
 );
@@ -319,6 +330,28 @@ function mock_mirlo_checkout_page() {
             '<p>On the real site this would be Stripe checkout for tier <strong>%d</strong>.</p><p>%s<a class="btn secondary" href="javascript:history.back()">Back</a></p>',
             (int) ( $_GET['tier'] ?? 0 ),
             $success ? '<a class="btn" href="' . $success . '">Pay (go to success URL)</a> ' : ''
+        )
+    );
+}
+
+/**
+ * Pretend Mirlo ended the connection (a year passed, or it was disconnected
+ * under Connected apps). The plugin finds out at its next refresh.
+ */
+function mock_mirlo_end_connection_page() {
+    update_option( 'mock_mirlo_connection_ended', 1, false );
+    // Make the next use refresh straight away instead of within the hour.
+    $tokens = get_option( 'mirlo_oauth_tokens' );
+    if ( is_array( $tokens ) ) {
+        $tokens['expires_at'] = 0;
+        update_option( 'mirlo_oauth_tokens', $tokens, false );
+    }
+    mock_mirlo_page(
+        'Mock Mirlo: connection ended',
+        sprintf(
+            '<p>The fake Mirlo will refuse this site\'s next refresh. The plugin notices at its daily check, or as soon as something uses the connection, such as Preview Subscribers.</p>'
+            . '<p><a class="btn" href="%s">Go to the settings</a></p>',
+            esc_url( admin_url( 'options-general.php?page=mirlo-subscribe' ) )
         )
     );
 }
