@@ -1,0 +1,95 @@
+<!-- wp:paragraph -->
+<p>Every Mirlo Subscribe shortcode against the mock Mirlo. Edit <code>dev/preview-page.html</code> and reload to change this page.</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:heading -->
+<h2 class="wp-block-heading">Pop-up button</h2>
+<!-- /wp:heading -->
+
+<!-- wp:shortcode -->
+[mirlo_pop_up artist="mock-artist"]
+<!-- /wp:shortcode -->
+
+<!-- wp:heading {"level":3} -->
+<h3 class="wp-block-heading">Full width, own colour and text, two tiers only</h3>
+<!-- /wp:heading -->
+
+<!-- wp:shortcode -->
+[mirlo_pop_up artist="mock-artist" full_width="true" color="#2a7a4b" button_text="Join the club" tier_ids="3,2"]
+<!-- /wp:shortcode -->
+
+<!-- wp:heading {"level":3} -->
+<h3 class="wp-block-heading">Back to this site after paying</h3>
+<!-- /wp:heading -->
+
+<!-- wp:paragraph -->
+<p>Uses <code>success_url="/thanks"</code>. Choosing a tier fails until an API key is set in Settings → Mirlo Subscribe, like on the real Mirlo. Any key works with the fake Mirlo.</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:shortcode -->
+[mirlo_pop_up artist="mock-artist" button_text="Subscribe, then come back" success_url="/thanks"]
+<!-- /wp:shortcode -->
+
+<!-- wp:heading {"level":3} -->
+<h3 class="wp-block-heading">Slow to load (3 seconds)</h3>
+<!-- /wp:heading -->
+
+<!-- wp:shortcode -->
+[mirlo_pop_up artist="slow" button_text="Open slowly"]
+<!-- /wp:shortcode -->
+
+<!-- wp:heading {"level":3} -->
+<h3 class="wp-block-heading">Artist not found, Mirlo error, no tiers</h3>
+<!-- /wp:heading -->
+
+<!-- wp:shortcode -->
+[mirlo_pop_up artist="missing" button_text="Missing artist"] [mirlo_pop_up artist="broken" button_text="Mirlo error"] [mirlo_pop_up artist="no-tiers" button_text="No tiers"]
+<!-- /wp:shortcode -->
+
+<!-- wp:heading -->
+<h2 class="wp-block-heading">Tier list</h2>
+<!-- /wp:heading -->
+
+<!-- wp:shortcode -->
+[mirlo_tier_list artist="mock-artist"]
+<!-- /wp:shortcode -->
+
+<!-- wp:heading {"level":3} -->
+<h3 class="wp-block-heading">Own colour, two tiers only</h3>
+<!-- /wp:heading -->
+
+<!-- wp:shortcode -->
+[mirlo_tier_list artist="mock-artist" color="#2a7a4b" tier_ids="2,3"]
+<!-- /wp:shortcode -->
+
+<!-- wp:heading {"level":3} -->
+<h3 class="wp-block-heading">No tiers, artist not found, Mirlo error</h3>
+<!-- /wp:heading -->
+
+<!-- wp:shortcode -->
+[mirlo_tier_list artist="no-tiers"]
+<!-- /wp:shortcode -->
+
+<!-- wp:shortcode -->
+[mirlo_tier_list artist="missing"]
+<!-- /wp:shortcode -->
+
+<!-- wp:shortcode -->
+[mirlo_tier_list artist="broken"]
+<!-- /wp:shortcode -->
+
+<!-- wp:heading -->
+<h2 class="wp-block-heading">Original shortcode names</h2>
+<!-- /wp:heading -->
+
+<!-- wp:paragraph -->
+<p>[[mirlo_subscribe]] and [[mirlo_tiers]] now show the same as [[mirlo_pop_up]] and [[mirlo_tier_list]].</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:shortcode -->
+[mirlo_subscribe artist="mock-artist"]
+<!-- /wp:shortcode -->
+
+<!-- wp:shortcode -->
+[mirlo_tiers artist="mock-artist"]
+<!-- /wp:shortcode -->

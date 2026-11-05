@@ -1,0 +1,23 @@
+{
+	"$schema": "https://playground.wordpress.net/blueprint-schema.json",
+	"landingPage": "/?pagename=mirlo-preview",
+	"preferredVersions": {
+		"php": "8.2",
+		"wp": "latest"
+	},
+	"login": true,
+	"steps": [
+		{
+			"step": "activatePlugin",
+			"pluginPath": "mirlo-subscribe/mirlo-subscribe.php"
+		},
+		{
+			"step": "setSiteOptions",
+			"options": {
+				"blogname": "Mirlo Subscribe dev",
+				"mirlo_instance_url": "http://mirlo.mock",
+				"mirlo_oauth_client_id": "1"
+			}
+		}
+	]
+}

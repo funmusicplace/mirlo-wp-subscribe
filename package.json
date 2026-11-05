@@ -1,0 +1,8 @@
+{
+	"name": "mirlo-subscribe-dev",
+	"private": true,
+	"description": "Development tooling only. Not part of the released plugin.",
+	"scripts": {
+		"dev": "npx @wp-playground/cli@latest server --mount=.:/wordpress/wp-content/plugins/mirlo-subscribe --mount=./dev/mu-plugins:/wordpress/wp-content/mu-plugins --blueprint=./dev/blueprint.json"
+	}
+}
