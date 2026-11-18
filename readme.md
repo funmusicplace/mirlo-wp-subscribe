@@ -4,7 +4,7 @@ Contributors: Mirlo Code Circle
 Tags: mirlo, music, subscriptions, modal
 Requires at least: 6.0
 Tested up to: 6.5
-Stable tag: 1.3.1
+Stable tag: 1.4.0
 License: AGPLv3 or later
 
 Add Mirlo artist subscription modals to any post or page via shortcode.
@@ -35,6 +35,46 @@ Mirlo; any other address is ignored. It needs an **API Key**
 in the settings (ask hi@mirlo.space): without one, Mirlo only lets buyers
 return to Mirlo itself. The original `[mirlo_subscribe]` and `[mirlo_tiers]` shortcodes
 still work and show the same as these.
+
+### Catalog
+
+Shows the artist's merch and subscription tiers as cards, each with a button
+that starts Mirlo's checkout, where the buyer enters their email, address and
+card.
+
+    [mirlo_catalog artist="your-artist-slug"]
+
+| Attribute | |
+|---|---|
+| `show` | Which sections, in that order: `merch,tiers` (default), `merch` or `tiers` |
+| `merch_ids`, `tier_ids` | Only these items or tiers, in that order |
+| `columns` | The most cards in a row (default 3). Fewer fit on narrow screens |
+| `color` | Button colour, as `#hex` |
+| `merch_title`, `tiers_title` | Section headings (default "Merch" and "Subscriptions"). Empty for none |
+| `success_url` | As for `[mirlo_pop_up]` |
+
+Mirlo's checkout can't choose a variant or a shipping region, so merch is
+bought one item at a time, at its minimum price, and:
+
+- items with no required variant (such as a size) and at most one shipping
+  region get a **Buy** button that goes straight to checkout;
+- items with a required variant, more than one shipping region, or the EU
+  region get **Buy on Mirlo**, a link to the item's page on Mirlo;
+- items with an external shop link go to that shop, and sold-out items say so.
+
+**Styling.** The cards use BEM classes (`mirlo-catalog`, `__section`,
+`__heading`, `__items`, `__item`, `__item--merch`, `__item--tier`,
+`__item--sold-out`, `__image`, `__body`, `__title`, `__price`, `__stock`,
+`__description`, `__actions`, `__buy`, `__buy--link`, `__buy--sold-out`,
+`__error`). The plugin's rules have no specificity, so any rule in your theme
+wins. For small changes, set these CSS variables on `.mirlo-catalog`:
+`--mirlo-accent`, `--mirlo-catalog-columns`, `--mirlo-catalog-min-width`,
+`--mirlo-catalog-gap`, `--mirlo-catalog-radius`, `--mirlo-catalog-image-ratio`
+(such as `4 / 5`), `--mirlo-catalog-border` and
+`--mirlo-catalog-card-background`. To leave out the plugin's stylesheet
+entirely:
+
+    add_filter( 'mirlo_catalog_load_styles', '__return_false' );
 
 ## Connecting a Mirlo account
 
@@ -101,7 +141,7 @@ This starts WordPress in [WordPress Playground](https://wordpress.github.io/word
 The site talks to a fake Mirlo instead of the real one ([dev/mu-plugins/mock-mirlo.php](dev/mu-plugins/mock-mirlo.php)), with made-up artists, tiers and subscribers:
 
 - **Connect to Mirlo** in **Settings → Mirlo Subscribe** opens a fake approval page where you can allow or deny the connection.
-- Use the artist slugs `missing`, `broken`, `no-tiers`, `slow` and `no-subscribers` to see error, empty and loading states.
+- Use the artist slugs `missing`, `broken`, `no-tiers`, `no-merch`, `old-mirlo`, `slow` and `no-subscribers` to see error, empty and loading states.
 - Checkout goes to a fake payment page.
 - Visit `/?mock_mirlo=end-connection` to pretend Mirlo ended the connection, and see the warning.
 - To change what the preview page shows, edit [dev/preview-page.html](dev/preview-page.html).
@@ -120,3 +160,4 @@ Nothing in `dev/`, `package.json`, `composer.json` or `phpcs.xml.dist` is includ
 1.2.0 Connect a Mirlo account over OAuth to read subscribers, renewed daily, with a warning on every admin page if Mirlo ends it; choose the Mirlo instance; deleting the plugin removes its settings and disconnects from Mirlo; `[mirlo_subscribe]` and `[mirlo_tiers]` now use the same checkout as `[mirlo_pop_up]` and `[mirlo_tier_list]`, since Mirlo removed the endpoint they used
 1.3.0 `Mirlo_API::purchase_subscription()` takes an optional monthly amount, for tiers where people choose what they pay
 1.3.1 `success_url` must be a page on this site or on Mirlo, and is checked again when someone checks out; artist details are kept for 15 minutes; visitors see a short message instead of Mirlo's raw error when tiers can't load or checkout fails (admins still see the details); `Mirlo_API::return_url()` and the artist cache are public, for add-ons
+1.4.0 `[mirlo_catalog]` shows an artist's merch and tiers as cards that go straight to Mirlo's checkout; `Mirlo_API::get_artist_merch()` and `Mirlo_API::purchase_merch()`

@@ -11,10 +11,14 @@
  *   no-tiers        the artist has no subscription tiers
  *   slow            Mirlo takes 3 seconds to answer, to see loading states
  *   no-subscribers  the connected account's subscriber list is empty
+ *   no-merch        the artist has no merch
+ *   old-mirlo       a Mirlo without GET /artists/{id}/merch (404), so
+ *                   [mirlo_catalog] falls back to the artist's merch
  *   pay-what-you-want  tiers where people choose what they pay, like
  *                   Patchwork's: a member tier from $25 and an
  *                   organization tier from $100, plus one fixed-price tier
- * Any other slug is a normal artist with four tiers and a few subscribers.
+ * Any other slug is a normal artist with four tiers, a few subscribers, and
+ * merch covering each way [mirlo_catalog] can sell it (see mock_mirlo_merch).
  *
  * Like the real Mirlo, checkout with a success_url on this site only works
  * once an API key is set in the settings. Any key will do here.
@@ -152,6 +156,17 @@ function mock_mirlo_route( $method, $path, $query, $args ) {
         return mock_mirlo_response( 200, array( 'result' => mock_mirlo_artist( $slug ) ) );
     }
 
+    if ( 'GET' === $method && preg_match( '#^/artists/([^/]+)/merch$#', $endpoint, $m ) ) {
+        $slug = rawurldecode( $m[1] );
+        if ( in_array( $slug, array( 'missing', 'broken' ), true ) ) {
+            return mock_mirlo_artist_error( $slug );
+        }
+        if ( 'old-mirlo' === $slug ) {
+            return mock_mirlo_response( 404, array( 'error' => "Mock Mirlo doesn't know $method $path" ) );
+        }
+        return mock_mirlo_response( 200, array( 'results' => mock_mirlo_merch( $slug ) ) );
+    }
+
     if ( preg_match( '#^/artists/(\d+)/subscriptionTiers$#', $endpoint ) ) {
         return mock_mirlo_response( 200, array( 'results' => mock_mirlo_tiers() ) );
     }
@@ -166,6 +181,13 @@ function mock_mirlo_route( $method, $path, $query, $args ) {
             if ( $error ) {
                 return mock_mirlo_response( 400, array( 'error' => $error ) );
             }
+        }
+        if ( 'merch' === ( $body['items'][0]['type'] ?? '' ) ) {
+            $error = mock_mirlo_merch_error( $body['items'][0] );
+            if ( $error ) {
+                return mock_mirlo_response( 400, array( 'error' => $error ) );
+            }
+            return mock_mirlo_response( 200, array( 'redirectUrl' => mock_mirlo_checkout_url( 0, $success_url, null, $body['items'][0]['id'] ) ) );
         }
         $tier_id = (int) ( $body['items'][0]['tierId'] ?? 0 );
         $amount  = $body['items'][0]['amount'] ?? null;
@@ -229,6 +251,37 @@ function mock_mirlo_amount_error( $tier_id, $amount ) {
     return null;
 }
 
+/** Like Mirlo's resolveMerchPurchaseItem and resolveMerchOptionIds. */
+function mock_mirlo_merch_error( $item ) {
+    $merch = null;
+    foreach ( mock_mirlo_merch() as $candidate ) {
+        if ( $candidate['id'] === ( $item['id'] ?? '' ) ) {
+            $merch = $candidate;
+        }
+    }
+    if ( ! $merch ) {
+        return 'Merch ' . ( $item['id'] ?? '' ) . ' not found';
+    }
+    if ( 0 === $merch['quantityRemaining'] ) {
+        return 'This merch is sold out';
+    }
+    foreach ( $merch['optionTypes'] as $type ) {
+        $chosen = array_intersect( array_column( $type['options'], 'id' ), (array) ( $item['merchOptionIds'] ?? array() ) );
+        if ( $type['required'] && $type['options'] && ! $chosen ) {
+            return 'You have to choose a ' . $type['optionName'] . ' for this merch item';
+        }
+    }
+    if ( $merch['shippingDestinations'] ) {
+        if ( empty( $item['shippingDestinationId'] ) ) {
+            return 'shippingDestinationId is required for this merch item';
+        }
+        if ( ! in_array( $item['shippingDestinationId'], array_column( $merch['shippingDestinations'], 'id' ), true ) ) {
+            return "Supplied destination isn't a valid destination for the seller";
+        }
+    }
+    return null;
+}
+
 function mock_mirlo_artist_error( $slug ) {
     return 'missing' === $slug
         ? mock_mirlo_response( 404, array( 'error' => 'Artist not found' ) )
@@ -251,6 +304,77 @@ function mock_mirlo_artist( $slug ) {
         'avatar'            => array( 'sizes' => array( '300' => $avatar ) ),
         'user'              => array( 'currency' => 'usd' ),
         'subscriptionTiers' => 'no-tiers' === $slug ? array() : mock_mirlo_tiers( $slug ),
+        // Like Mirlo: the artist's merch has no variants or shipping regions.
+        'merch'             => array_map(
+            function ( $merch ) {
+                unset( $merch['optionTypes'], $merch['shippingDestinations'] );
+                return $merch;
+            },
+            mock_mirlo_merch( $slug )
+        ),
+    );
+}
+
+/**
+ * Merch for GET /artists/{id}/merch, one item for each way [mirlo_catalog]
+ * sells it. The comment says which.
+ */
+function mock_mirlo_merch( $slug = '' ) {
+    if ( 'no-merch' === $slug ) {
+        return array();
+    }
+    $image = function ( $color, $text ) {
+        $svg = 'data:image/svg+xml,' . rawurlencode(
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="' . $color . '"/>'
+            . '<text x="50" y="58" font-size="14" text-anchor="middle" fill="#fff" font-family="sans-serif">' . $text . '</text></svg>'
+        );
+        return array( array( 'id' => 'img-' . $text, 'sizes' => array( '600' => $svg ) ) );
+    };
+    $item = function ( $id, $title, $price, $extra = array() ) {
+        return array_merge(
+            array(
+                'id'                   => $id,
+                'artistId'             => 42,
+                'title'                => $title,
+                'urlSlug'              => $id,
+                'minPrice'             => $price,
+                'currency'             => 'usd',
+                'quantityRemaining'    => null,
+                'externalUrl'          => null,
+                'images'               => array(),
+                'optionTypes'          => array(),
+                'shippingDestinations' => array(),
+            ),
+            $extra
+        );
+    };
+    $us     = array( 'id' => 'ship-us', 'homeCountry' => 'US', 'destinationCountry' => 'US', 'costUnit' => 500, 'costExtraUnit' => 100 );
+    $world  = array( 'id' => 'ship-world', 'homeCountry' => 'US', 'destinationCountry' => null, 'costUnit' => 1500, 'costExtraUnit' => 500 );
+    $eu     = array( 'id' => 'ship-eu', 'homeCountry' => 'DE', 'destinationCountry' => 'EU', 'costUnit' => 700, 'costExtraUnit' => 200 );
+    $sizes  = array(
+        'optionName' => 'size',
+        'required'   => true,
+        'options'    => array(
+            array( 'id' => 'opt-s', 'name' => 'S' ),
+            array( 'id' => 'opt-m', 'name' => 'M' ),
+        ),
+    );
+    $colour = array_merge( $sizes, array( 'optionName' => 'colour', 'required' => false ) );
+    return array(
+        // Checkout, no shipping.
+        $item( 'merch-digital', 'Digital zine', 800, array( 'images' => $image( '#2a7a4b', 'zine' ) ) ),
+        // Checkout, with the one shipping region. An optional variant is left out.
+        $item( 'merch-poster', 'Tour poster', 2000, array( 'images' => $image( '#be3455', 'poster' ), 'quantityRemaining' => 3, 'shippingDestinations' => array( $us ), 'optionTypes' => array( $colour ) ) ),
+        // Link: more than one shipping region.
+        $item( 'merch-vinyl', 'Vinyl LP', 2500, array( 'images' => $image( '#1a73e8', 'vinyl' ), 'shippingDestinations' => array( $us, $world ) ) ),
+        // Link: a size has to be chosen.
+        $item( 'merch-shirt', 'T-shirt <b>escaped</b> & co', 3000, array( 'shippingDestinations' => array( $us ), 'optionTypes' => array( $sizes ) ) ),
+        // Link: the EU region needs a country.
+        $item( 'merch-tote', 'Tote bag', 1500, array( 'currency' => 'eur', 'shippingDestinations' => array( $eu ) ) ),
+        // The artist's own shop.
+        $item( 'merch-elsewhere', 'Hat from the band shop', 2200, array( 'externalUrl' => 'https://shop.example/hat' ) ),
+        // Sold out.
+        $item( 'merch-gone', 'Cassette', 1000, array( 'quantityRemaining' => 0 ) ),
     );
 }
 
@@ -325,11 +449,12 @@ function mock_mirlo_subscribers( $slug = '' ) {
     return $results;
 }
 
-function mock_mirlo_checkout_url( $tier_id, $success_url, $amount = null ) {
+function mock_mirlo_checkout_url( $tier_id, $success_url, $amount = null, $merch_id = '' ) {
     return add_query_arg(
         array(
             'mock_mirlo' => 'checkout',
             'tier'       => (int) $tier_id,
+            'merch'      => rawurlencode( $merch_id ),
             'amount'     => null === $amount ? '' : (int) $amount,
             'success'    => rawurlencode( $success_url ),
         ),
@@ -396,8 +521,10 @@ function mock_mirlo_checkout_page() {
     mock_mirlo_page(
         'Mock checkout',
         sprintf(
-            '<p>On the real site this would be Stripe checkout for tier <strong>%d</strong>%s.</p><p>%s<a class="btn secondary" href="javascript:history.back()">Back</a></p>',
-            (int) ( $_GET['tier'] ?? 0 ),
+            '<p>On the real site this would be Mirlo\'s checkout for %s%s.</p><p>%s<a class="btn secondary" href="javascript:history.back()">Back</a></p>',
+            '' !== ( $_GET['merch'] ?? '' )
+                ? 'merch <strong>' . esc_html( sanitize_text_field( wp_unslash( $_GET['merch'] ) ) ) . '</strong>'
+                : 'tier <strong>' . (int) ( $_GET['tier'] ?? 0 ) . '</strong>',
             '' !== ( $_GET['amount'] ?? '' ) ? sprintf( ' at <strong>%s</strong> a month', esc_html( number_format( (int) $_GET['amount'] / 100, 2 ) ) ) : '',
             $success ? '<a class="btn" href="' . $success . '">Pay (go to success URL)</a> ' : ''
         )

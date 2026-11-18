@@ -1,0 +1,145 @@
+/* [mirlo_catalog]
+ *
+ * Every rule is wrapped in :where(), so it has no specificity and any rule in
+ * your theme wins. To restyle without writing selectors, set these on
+ * .mirlo-catalog (or any parent):
+ *
+ *   --mirlo-accent              button colour (also the color="" attribute)
+ *   --mirlo-catalog-columns     the most cards in a row (also columns="")
+ *   --mirlo-catalog-min-width   how narrow a card may get before wrapping
+ *   --mirlo-catalog-gap         space between cards
+ *   --mirlo-catalog-radius      card and image corners
+ *   --mirlo-catalog-image-ratio merch image shape, e.g. 4 / 5
+ *   --mirlo-catalog-border      card border
+ *   --mirlo-catalog-card-background
+ *
+ * To drop this file and style it all yourself:
+ *   add_filter( 'mirlo_catalog_load_styles', '__return_false' );
+ */
+
+:where(.mirlo-catalog) {
+  --mirlo-catalog-columns: 3;
+  --mirlo-catalog-min-width: 12rem;
+  --mirlo-catalog-gap: 1.25rem;
+  --mirlo-catalog-radius: 8px;
+  --mirlo-catalog-image-ratio: 1 / 1;
+  --mirlo-catalog-border: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+  --mirlo-catalog-card-background: transparent;
+  display: grid;
+  gap: calc(var(--mirlo-catalog-gap) * 2);
+}
+
+:where(.mirlo-catalog__heading) {
+  margin: 0 0 var(--mirlo-catalog-gap);
+}
+
+/* As many columns as fit, up to --mirlo-catalog-columns. */
+:where(.mirlo-catalog__items) {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--mirlo-catalog-gap);
+  grid-template-columns: repeat(
+    auto-fill,
+    minmax(
+      min(
+        100%,
+        max(
+          var(--mirlo-catalog-min-width),
+          (100% - (var(--mirlo-catalog-columns) - 1) * var(--mirlo-catalog-gap)) / var(--mirlo-catalog-columns)
+        )
+      ),
+      1fr
+    )
+  );
+}
+
+:where(.mirlo-catalog__item) {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 1rem;
+  border: var(--mirlo-catalog-border);
+  border-radius: var(--mirlo-catalog-radius);
+  background: var(--mirlo-catalog-card-background);
+}
+
+:where(.mirlo-catalog__image) {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: var(--mirlo-catalog-image-ratio);
+  object-fit: cover;
+  border-radius: calc(var(--mirlo-catalog-radius) / 2);
+}
+
+:where(.mirlo-catalog__image--none) {
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+
+:where(.mirlo-catalog__body) {
+  flex: 1;
+}
+
+:where(.mirlo-catalog__title) {
+  margin: 0;
+  font-size: 1.1em;
+}
+
+:where(.mirlo-catalog__price, .mirlo-catalog__stock, .mirlo-catalog__description) {
+  margin: 0.25rem 0 0;
+}
+
+:where(.mirlo-catalog__price) {
+  font-weight: 600;
+}
+
+:where(.mirlo-catalog__stock, .mirlo-catalog__description) {
+  font-size: 0.9em;
+  opacity: 0.8;
+}
+
+:where(.mirlo-catalog__buy) {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.6rem 1rem;
+  border: none;
+  border-radius: 4px;
+  background: var(--mirlo-accent, #1a73e8);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+  transition: filter 0.2s;
+}
+
+:where(.mirlo-catalog__buy:hover, .mirlo-catalog__buy:focus-visible) {
+  filter: brightness(0.9);
+  color: #fff;
+}
+
+:where(.mirlo-catalog__buy[disabled]) {
+  cursor: progress;
+  opacity: 0.7;
+}
+
+:where(.mirlo-catalog__buy--sold-out) {
+  background: color-mix(in srgb, currentColor 15%, transparent);
+  color: inherit;
+  cursor: default;
+}
+
+:where(.mirlo-catalog__item--sold-out .mirlo-catalog__image) {
+  opacity: 0.5;
+}
+
+:where(.mirlo-catalog__error) {
+  margin: 0.5rem 0 0;
+  font-size: 0.9em;
+  color: #b3261e;
+}

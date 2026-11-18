@@ -79,6 +79,46 @@
 <!-- /wp:shortcode -->
 
 <!-- wp:heading -->
+<h2 class="wp-block-heading">Catalog</h2>
+<!-- /wp:heading -->
+
+<!-- wp:paragraph -->
+<p>Merch and tiers as cards. Digital zine and Tour poster go straight to checkout; Vinyl LP (two shipping regions), T-shirt (a size to choose) and Tote bag (EU shipping) link to Mirlo; the hat links to the band's shop; the cassette is sold out.</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:shortcode -->
+[mirlo_catalog artist="mock-artist"]
+<!-- /wp:shortcode -->
+
+<!-- wp:heading {"level":3} -->
+<h3 class="wp-block-heading">Two items and two tiers, tiers first, two columns, own colour, back to /thanks</h3>
+<!-- /wp:heading -->
+
+<!-- wp:shortcode -->
+[mirlo_catalog artist="mock-artist" show="tiers,merch" merch_ids="merch-poster,merch-digital" tier_ids="3,2" columns="2" color="#2a7a4b" tiers_title="Join" merch_title="" success_url="/thanks"]
+<!-- /wp:shortcode -->
+
+<!-- wp:heading {"level":3} -->
+<h3 class="wp-block-heading">No merch, a Mirlo without the merch endpoint, artist not found, Mirlo error</h3>
+<!-- /wp:heading -->
+
+<!-- wp:shortcode -->
+[mirlo_catalog artist="no-merch" show="merch"]
+<!-- /wp:shortcode -->
+
+<!-- wp:shortcode -->
+[mirlo_catalog artist="old-mirlo" show="merch"]
+<!-- /wp:shortcode -->
+
+<!-- wp:shortcode -->
+[mirlo_catalog artist="missing"]
+<!-- /wp:shortcode -->
+
+<!-- wp:shortcode -->
+[mirlo_catalog artist="broken"]
+<!-- /wp:shortcode -->
+
+<!-- wp:heading -->
 <h2 class="wp-block-heading">Original shortcode names</h2>
 <!-- /wp:heading -->
 

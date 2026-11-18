@@ -3,6 +3,7 @@
 class Mirlo_API {
     const ARTIST_CACHE = 'mirlo_artist_';
     const ARTIST_TTL   = 15 * MINUTE_IN_SECONDS;
+    const MERCH_CACHE  = 'mirlo_merch_';
 
     private $base_url;
     private $api_key;
@@ -28,6 +29,28 @@ class Mirlo_API {
         }
         $result = $this->make_request( '/artists/' . rawurlencode( $url_slug ) );
         if ( ! isset( $result['error'] ) && isset( $result['result']['id'] ) ) {
+            set_transient( $key, $result, self::ARTIST_TTL );
+        }
+        return $result;
+    }
+
+    /**
+     * An artist's public merch, with each item's variants and shipping
+     * regions. Kept for 15 minutes, like the artist.
+     *
+     * @param string|int $artist Artist URL slug or ID.
+     * @param bool       $fresh  Ask Mirlo even if there's a saved copy.
+     */
+    public function get_artist_merch( $artist, $fresh = false ) {
+        $key = self::MERCH_CACHE . md5( $this->base_url . '|' . $artist );
+        if ( ! $fresh ) {
+            $cached = get_transient( $key );
+            if ( is_array( $cached ) ) {
+                return $cached;
+            }
+        }
+        $result = $this->make_request( '/artists/' . rawurlencode( (string) $artist ) . '/merch' );
+        if ( ! isset( $result['error'] ) && isset( $result['results'] ) && is_array( $result['results'] ) ) {
             set_transient( $key, $result, self::ARTIST_TTL );
         }
         return $result;
@@ -76,6 +99,42 @@ class Mirlo_API {
         );
         if ( null !== $amount ) {
             $item['amount'] = intval( $amount );
+        }
+        $body = array(
+            'artistId' => intval( $artist_id ),
+            'hosted'   => true,
+            'items'    => array( $item ),
+        );
+
+        if ( $success_url ) {
+            $body['successUrl'] = $success_url;
+        }
+
+        return $this->make_request( '/purchase', 'POST', $body );
+    }
+
+    /**
+     * Start a hosted checkout for one merch item at its minimum price. Mirlo
+     * answers with a redirectUrl to send the buyer to, where they enter
+     * their email, address and card.
+     *
+     * @param string      $merch_id                The merch item's ID.
+     * @param string|null $shipping_destination_id Required by Mirlo when the
+     *                                             item has shipping regions.
+     * @param string[]    $merch_option_ids        Chosen variants, one per
+     *                                             required variant type.
+     */
+    public function purchase_merch( $artist_id, $merch_id, $success_url = null, $shipping_destination_id = null, $merch_option_ids = array() ) {
+        $item = array(
+            'type'     => 'merch',
+            'id'       => (string) $merch_id,
+            'quantity' => 1,
+        );
+        if ( $shipping_destination_id ) {
+            $item['shippingDestinationId'] = (string) $shipping_destination_id;
+        }
+        if ( ! empty( $merch_option_ids ) ) {
+            $item['merchOptionIds'] = array_values( array_map( 'strval', $merch_option_ids ) );
         }
         $body = array(
             'artistId' => intval( $artist_id ),

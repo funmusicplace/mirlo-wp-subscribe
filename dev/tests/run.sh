@@ -42,7 +42,7 @@ check "tier buttons from [mirlo_tier_list] and [mirlo_tiers]" 10 "$(grep -o 'cla
 check "no buttons from the old shortcode code" 0 "$(grep -o 'class="mirlo-tier"' "$S/preview.html" | wc -l | tr -d ' ')"
 check_has "pop-up markup" 'id="mirlo-modal-v2"' "$PAGE"
 check_has "pop-up script" 'mirlo-modal-v2.js' "$PAGE"
-check "visitors get a short message when tiers can't load" 2 "$(grep -o "Couldn&#039;t load the subscription tiers. Please try again later." "$S/preview.html" | wc -l | tr -d ' ')"
+check "visitors get a short message when tiers can't load (tier list and catalog)" 4 "$(grep -o "Couldn&#039;t load the subscription tiers. Please try again later." "$S/preview.html" | wc -l | tr -d ' ')"
 check_lacks "visitors don't see Mirlo's raw errors" 'HTTP 404' "$PAGE"
 check_has "a relative success_url becomes a full address" "data-success-url=\"$B/thanks\"" "$PAGE"
 
@@ -73,6 +73,39 @@ check_has "  the checkout page links back" "href=\"$B/thanks/?a=1\"" "$(curl -s 
 check_lacks "with a key, another site: dropped by the plugin" 'elsewhere' "$(buy https://elsewhere.example/thanks | json 'd["data"]["redirectUrl"]')"
 $WPCLI option update mirlo_api_key "" >/dev/null
 check "the old subscribe AJAX action is gone" "0" "$(curl -s "$B/wp-admin/admin-ajax.php" -d action=mirlo_subscribe -d nonce=$NONCE -d artist_id=42 -d tier_id=2)"
+
+section "catalog"
+CAT=$(curl -s "$B/?pagename=mirlo-preview")
+cat_count() { echo "$CAT" | grep -o "$1" | wc -l | tr -d ' '; }
+check "Buy buttons: 2 in the full catalog, 2 picked" 4 "$(cat_count 'data-mirlo-buy="merch"')"
+check "Subscribe buttons: 4 in the full catalog, 2 picked" 6 "$(cat_count 'data-mirlo-buy="tier"')"
+check "Buy on Mirlo links: vinyl, shirt, tote, plus 5 from the old-Mirlo fallback" 8 "$(cat_count '>Buy on Mirlo</a>')"
+check_has "  linking to the item's page" 'href="http://mirlo.mock/mock-artist/merch/merch-vinyl"' "$CAT"
+check_has "the artist's own shop link" 'href="https://shop.example/hat"' "$CAT"
+check "sold out, in the catalog and the fallback" 2 "$(cat_count 'mirlo-catalog__item--sold-out')"
+check_has "prices are readable without JavaScript" '>$20.00</p>' "$CAT"
+check_has "  in the item's currency" '>€15.00</p>' "$CAT"
+check_has "titles are escaped" 'T-shirt &lt;b&gt;escaped&lt;/b&gt; &amp; co' "$CAT"
+SECOND=$(echo "$CAT" | awk '/class="mirlo-catalog"/{n++} n==2' | grep -o 'data-merch-id="[^"]*"\|data-tier-id="[^"]*"' | paste -sd' ')
+check "picked items and tiers keep their order" 'data-tier-id="3" data-tier-id="2" data-merch-id="merch-poster" data-merch-id="merch-digital"' "$SECOND"
+check_has "columns and colour become CSS variables" 'style="--mirlo-accent:#2a7a4b;--mirlo-catalog-columns:2"' "$CAT"
+check_has "an empty title hides the heading" '<section class="mirlo-catalog__section mirlo-catalog__section--merch"><ul' "$CAT"
+check_has "no merch" 'No merch available.' "$CAT"
+check "visitors get a short message when merch can't load" 2 "$(cat_count "Couldn&#039;t load the merch. Please try again later.")"
+check_has "stylesheet loads in the head" "mirlo-catalog.css" "$(echo "$CAT" | sed -n '1,/<\/head>/p')"
+NONCE3=$(echo "$CAT" | grep -o 'var mirloCatalog = {[^}]*}' | grep -o '"nonce":"[^"]*"' | cut -d'"' -f4)
+merch() { curl -s "$B/wp-admin/admin-ajax.php" -d action=mirlo_purchase_merch -d nonce=$NONCE3 -d artist=${2:-mock-artist} -d merch_id=$1 ${3:+--data-urlencode success_url="$3"}; }
+check_has "digital merch: checkout starts" 'merch=merch-digital' "$(merch merch-digital | json 'd["data"]["redirectUrl"]')"
+check "one shipping region: checkout starts" "True" "$(merch merch-poster | json 'd["success"]')"
+check "two shipping regions: refused here" "This item can't be bought here. Please try again later." "$(merch merch-vinyl | json 'd["data"]["message"]')"
+check "a size to choose: refused here" "False" "$(merch merch-shirt | json 'd["success"]')"
+check "sold out: refused here" "False" "$(merch merch-gone | json 'd["success"]')"
+check "unknown merch: refused" "False" "$(merch nope | json 'd["success"]')"
+check "  without Mirlo's details" "None" "$(merch nope | json 'd["data"]["detail"]')"
+check "back to this site without a key: Mirlo refuses" "False" "$(merch merch-digital mock-artist "$B/thanks" | json 'd["success"]')"
+check "tier checkout from the catalog's nonce" "True" "$(curl -s "$B/wp-admin/admin-ajax.php" -d action=mirlo_purchase_v2 -d nonce=$NONCE3 -d artist_id=42 -d tier_id=3 | json 'd["success"]')"
+check "the merch is cached after one call" "yes" "$($WPCLI eval '$a = new Mirlo_API(); $a->get_artist_merch("mock-artist"); echo get_transient(Mirlo_API::MERCH_CACHE . md5("http://mirlo.mock/v1|mock-artist")) ? "yes" : "no";')"
+check "turning the stylesheet off" "no" "$($WPCLI eval 'add_filter("mirlo_catalog_load_styles","__return_false"); do_action("wp_enqueue_scripts"); do_shortcode("[mirlo_catalog artist=\"mock-artist\"]"); echo wp_style_is("mirlo-catalog") ? "yes" : "no";')"
 
 section "return addresses and the artist cache"
 ret() { $WPCLI eval "echo Mirlo_API::return_url('$1');"; }
