@@ -7,15 +7,52 @@
  * Merch that needs a choice Mirlo's checkout page can't make (a required
  * variant such as a size, or a shipping region out of several) links to the
  * item's page on Mirlo instead, which has the full form.
+ *
+ * With reader="yes", people with the mirlo_use_reader capability also get
+ * "Pay on reader" forms that send the sale to one of the artist's Stripe
+ * card readers, through the connected Mirlo account (pos scope), and wait
+ * for the card.
  */
 class Mirlo_Catalog {
     const SECTIONS = array( 'merch', 'tiers' );
+
+    /**
+     * Lets someone see and use the "Pay on reader" buttons, which charge
+     * through the connected Mirlo account. Administrators get it once; give
+     * it to other roles or users (e.g. volunteers at the merch table) with a
+     * role editor or a user_has_cap filter.
+     */
+    const READER_CAP = 'mirlo_use_reader';
+
+    /** Set once the capability has been given to administrators, so removing it sticks. */
+    const READER_CAP_OPTION = 'mirlo_reader_cap_added';
+
+    /** How long the page waits for a card before it stops checking. */
+    const READER_TIMEOUT = 180;
 
     public function __construct() {
         add_shortcode( 'mirlo_catalog', array( $this, 'render' ) );
         add_action( 'wp_enqueue_scripts', array( $this, 'register_assets' ) );
         add_action( 'wp_ajax_mirlo_purchase_merch', array( $this, 'ajax_purchase_merch' ) );
         add_action( 'wp_ajax_nopriv_mirlo_purchase_merch', array( $this, 'ajax_purchase_merch' ) );
+        // Signed-in users only: no nopriv versions.
+        add_action( 'wp_ajax_mirlo_reader_charge', array( $this, 'ajax_reader_charge' ) );
+        add_action( 'wp_ajax_mirlo_reader_status', array( $this, 'ajax_reader_status' ) );
+        add_action( 'wp_ajax_mirlo_reader_cancel', array( $this, 'ajax_reader_cancel' ) );
+        // Activation doesn't run on updates, so also check on admin pages.
+        add_action( 'admin_init', array( __CLASS__, 'add_reader_capability' ) );
+    }
+
+    /** Give administrators the reader capability, once. */
+    public static function add_reader_capability() {
+        if ( get_option( self::READER_CAP_OPTION ) ) {
+            return;
+        }
+        $admin = get_role( 'administrator' );
+        if ( $admin ) {
+            $admin->add_cap( self::READER_CAP );
+        }
+        update_option( self::READER_CAP_OPTION, 1, false );
     }
 
     /**
@@ -29,6 +66,10 @@ class Mirlo_Catalog {
      * merch_title  Heading above the merch. Empty for none. Default "Merch".
      * tiers_title  Heading above the tiers. Empty for none. Default "Subscriptions".
      * success_url  Where buyers land after paying, as for [mirlo_pop_up].
+     * reader       "yes" adds "Pay on reader" buttons that send the sale to one
+     *              of the artist's Stripe card readers. Only people with the
+     *              mirlo_use_reader capability see them, and only once card
+     *              reader sales are on in the settings.
      */
     public function render( $atts ) {
         $atts = shortcode_atts(
@@ -42,6 +83,7 @@ class Mirlo_Catalog {
                 'merch_title' => 'Merch',
                 'tiers_title' => 'Subscriptions',
                 'success_url' => '',
+                'reader'      => '',
             ),
             $atts,
             'mirlo_catalog'
@@ -63,11 +105,13 @@ class Mirlo_Catalog {
             $sections = self::SECTIONS;
         }
 
-        $html = '';
+        $reader = $this->reader_context( $atts );
+
+        $html = $reader ? $this->reader_bar( $reader ) : '';
         foreach ( $sections as $section ) {
             $html .= 'merch' === $section
-                ? $this->render_merch_section( $atts )
-                : $this->render_tiers_section( $atts );
+                ? $this->render_merch_section( $atts, $reader )
+                : $this->render_tiers_section( $atts, $reader );
         }
 
         $style   = array();
@@ -91,7 +135,163 @@ class Mirlo_Catalog {
         );
     }
 
-    private function render_merch_section( $atts ) {
+    /**
+     * What the reader buttons need, for someone allowed to use them: the
+     * artist's ID and readers. Null when there are no reader buttons. With
+     * a 'notice' instead, the buttons can't show and that says why.
+     */
+    private function reader_context( $atts ) {
+        $on = in_array( strtolower( trim( $atts['reader'] ) ), array( 'yes', 'true', '1' ), true );
+        if ( ! $on || ! current_user_can( self::READER_CAP ) ) {
+            return null;
+        }
+        if ( ! get_option( 'mirlo_reader_sales' ) || ! Mirlo_OAuth::has_scope( 'pos' ) ) {
+            return array(
+                'notice' => current_user_can( 'manage_options' )
+                    ? 'Card reader sales aren\'t set up. Turn them on in Settings → Mirlo Subscribe, then connect to Mirlo again.'
+                    : 'Card reader sales aren\'t set up yet. Ask a site admin.',
+            );
+        }
+
+        $api    = new Mirlo_API();
+        $artist = $api->get_artist( $atts['artist'] );
+        if ( empty( $artist['result']['id'] ) ) {
+            // The sections say the artist couldn't load.
+            return null;
+        }
+        $artist_id = (int) $artist['result']['id'];
+        $readers   = $api->get_artist_readers( $artist_id );
+
+        if ( isset( $readers['error'] ) ) {
+            return array(
+                'notice' => current_user_can( 'manage_options' )
+                    ? 'Couldn\'t load the card readers from Mirlo: ' . $readers['error'] . ' The connected Mirlo account needs to manage this artist.'
+                    : 'Couldn\'t load the card readers. Please try again later.',
+            );
+        }
+        if ( empty( $readers['results'] ) ) {
+            return array( 'notice' => 'This artist has no card readers on Mirlo.' );
+        }
+
+        // Online readers first.
+        $list = array_values( (array) $readers['results'] );
+        usort(
+            $list,
+            function ( $a, $b ) {
+                return ( 'online' === ( $b['status'] ?? '' ) ) <=> ( 'online' === ( $a['status'] ?? '' ) );
+            }
+        );
+
+        return array(
+            'artist_id' => $artist_id,
+            'readers'   => $list,
+        );
+    }
+
+    private function reader_bar( $reader ) {
+        if ( isset( $reader['notice'] ) ) {
+            return '<p class="mirlo-catalog__reader-notice">' . esc_html( $reader['notice'] ) . '</p>';
+        }
+        $options = '';
+        foreach ( $reader['readers'] as $r ) {
+            $name     = ! empty( $r['label'] ) ? $r['label'] : $r['id'];
+            $offline  = 'online' !== ( $r['status'] ?? '' );
+            $options .= sprintf(
+                '<option value="%s">%s</option>',
+                esc_attr( (string) $r['id'] ),
+                esc_html( $name . ( $offline ? ' (offline)' : '' ) )
+            );
+        }
+        return sprintf(
+            '<div class="mirlo-catalog__reader" data-artist-id="%s"><label class="mirlo-catalog__reader-label">Card reader '
+            . '<select class="mirlo-catalog__reader-select">%s</select></label></div>',
+            esc_attr( (string) $reader['artist_id'] ),
+            $options
+        );
+    }
+
+    /** Whether the reader buttons are on and working for this catalog. */
+    private static function reader_ready( $reader ) {
+        return $reader && ! isset( $reader['notice'] );
+    }
+
+    /**
+     * Whether a merch item can be sold on a card reader: in stock, sold
+     * through Mirlo, and with no shipping regions. Mirlo charges shipping
+     * for items that have them, even when the buyer takes the item home.
+     */
+    public static function reader_eligible( $merch ) {
+        if ( isset( $merch['quantityRemaining'] ) && 0 === (int) $merch['quantityRemaining'] ) {
+            return false;
+        }
+        if ( ! empty( $merch['externalUrl'] ) ) {
+            return false;
+        }
+        // Only the merch endpoint sends these.
+        if ( ! isset( $merch['optionTypes'], $merch['shippingDestinations'] ) ) {
+            return false;
+        }
+        return empty( $merch['shippingDestinations'] );
+    }
+
+    /** The "Pay on reader" form for a merch item, with a menu for each variant type. */
+    private function merch_reader_form( $merch ) {
+        $fields = '';
+        foreach ( (array) $merch['optionTypes'] as $type ) {
+            if ( empty( $type['options'] ) ) {
+                continue;
+            }
+            $required = ! empty( $type['required'] );
+            $options  = '<option value="">' . ( $required ? 'Choose…' : 'None' ) . '</option>';
+            foreach ( $type['options'] as $option ) {
+                $options .= sprintf(
+                    '<option value="%s">%s</option>',
+                    esc_attr( (string) ( $option['id'] ?? '' ) ),
+                    esc_html( (string) ( $option['name'] ?? '' ) )
+                );
+            }
+            $fields .= sprintf(
+                '<label class="mirlo-catalog__field">%s <select name="option_ids[]"%s>%s</select></label>',
+                esc_html( ucfirst( (string) ( $type['optionName'] ?? 'Option' ) ) ),
+                $required ? ' required' : '',
+                $options
+            );
+        }
+        return $this->reader_form( 'merch', array( 'merch-id' => (string) $merch['id'] ), $fields );
+    }
+
+    /** The "Pay on reader" form for a tier: the buyer's email, and the amount if they choose it. */
+    private function tier_reader_form( $tier, $currency ) {
+        $min    = (int) $tier['minAmount'];
+        $fields = '<label class="mirlo-catalog__field">Buyer\'s email <input type="email" name="email" required autocomplete="off"></label>';
+        if ( ! empty( $tier['allowVariable'] ) ) {
+            $fields .= sprintf(
+                '<label class="mirlo-catalog__field">Amount a month (%s) <input type="number" name="amount" min="%s" step="0.01" value="%s" required></label>',
+                esc_html( $currency ),
+                esc_attr( number_format( $min / 100, 2, '.', '' ) ),
+                esc_attr( number_format( $min / 100, 2, '.', '' ) )
+            );
+        }
+        return $this->reader_form( 'tier', array( 'tier-id' => (string) $tier['id'] ), $fields );
+    }
+
+    private function reader_form( $kind, $data, $fields ) {
+        $attrs = '';
+        foreach ( $data as $key => $value ) {
+            $attrs .= ' data-' . $key . '="' . esc_attr( $value ) . '"';
+        }
+        return sprintf(
+            '<form class="mirlo-catalog__reader-form" data-mirlo-reader="%s"%s>%s'
+            . '<button type="submit" class="mirlo-catalog__buy mirlo-catalog__buy--reader">Pay on reader</button>'
+            . '<p class="mirlo-catalog__reader-status" role="status" hidden></p>'
+            . '<button type="button" class="mirlo-catalog__reader-cancel" hidden>Cancel</button></form>',
+            esc_attr( $kind ),
+            $attrs,
+            $fields
+        );
+    }
+
+    private function render_merch_section( $atts, $reader = null ) {
         $api   = new Mirlo_API();
         $data  = $api->get_artist_merch( $atts['artist'] );
         $items = null;
@@ -122,12 +322,12 @@ class Mirlo_Catalog {
 
         $cards = '';
         foreach ( $items as $merch ) {
-            $cards .= $this->merch_card( $merch, $atts['artist'] );
+            $cards .= $this->merch_card( $merch, $atts['artist'], self::reader_ready( $reader ) );
         }
         return $this->section( 'merch', $atts['merch_title'], '<ul class="mirlo-catalog__items">' . $cards . '</ul>' );
     }
 
-    private function merch_card( $merch, $artist_slug ) {
+    private function merch_card( $merch, $artist_slug, $reader = false ) {
         $plan     = self::checkout_plan( $merch );
         $currency = strtoupper( $merch['currency'] ?? 'USD' );
         $title    = (string) ( $merch['title'] ?? '' );
@@ -165,17 +365,18 @@ class Mirlo_Catalog {
 
         return sprintf(
             '<li class="%s">%s<div class="mirlo-catalog__body"><h3 class="mirlo-catalog__title">%s</h3>%s%s</div>'
-            . '<div class="mirlo-catalog__actions">%s<p class="mirlo-catalog__error" role="alert" hidden></p></div></li>',
+            . '<div class="mirlo-catalog__actions">%s<p class="mirlo-catalog__error" role="alert" hidden></p>%s</div></li>',
             esc_attr( $classes ),
             $image,
             esc_html( $title ),
             self::price( (int) ( $merch['minPrice'] ?? 0 ), $currency ),
             $stock,
-            $button
+            $button,
+            $reader && self::reader_eligible( $merch ) ? $this->merch_reader_form( $merch ) : ''
         );
     }
 
-    private function render_tiers_section( $atts ) {
+    private function render_tiers_section( $atts, $reader = null ) {
         $api  = new Mirlo_API();
         $data = $api->get_artist( $atts['artist'] );
 
@@ -205,15 +406,21 @@ class Mirlo_Catalog {
                 ? '<p class="mirlo-catalog__description">' . esc_html( $tier['description'] ) . '</p>'
                 : '';
 
+            // A free tier has nothing to pay on a reader.
+            $reader_form = self::reader_ready( $reader ) && (int) ( $tier['minAmount'] ?? 0 ) > 0
+                ? $this->tier_reader_form( $tier, strtoupper( $tier['currency'] ?? $currency ) )
+                : '';
+
             $cards .= sprintf(
                 '<li class="mirlo-catalog__item mirlo-catalog__item--tier"><div class="mirlo-catalog__body"><h3 class="mirlo-catalog__title">%s</h3>%s%s</div>'
                 . '<div class="mirlo-catalog__actions"><button type="button" class="mirlo-catalog__buy" data-mirlo-buy="tier" data-artist-id="%s" data-tier-id="%s">Subscribe</button>'
-                . '<p class="mirlo-catalog__error" role="alert" hidden></p></div></li>',
+                . '<p class="mirlo-catalog__error" role="alert" hidden></p>%s</div></li>',
                 esc_html( $tier['name'] ?? '' ),
                 $price,
                 $description,
                 esc_attr( (string) $artist['id'] ),
-                esc_attr( (string) $tier['id'] )
+                esc_attr( (string) $tier['id'] ),
+                $reader_form
             );
         }
         return $this->section( 'tiers', $atts['tiers_title'], '<ul class="mirlo-catalog__items">' . $cards . '</ul>' );
@@ -317,6 +524,185 @@ class Mirlo_Catalog {
         wp_send_json_success( array( 'redirectUrl' => $result['redirectUrl'] ) );
     }
 
+    /* ------------------------------------------------------------------
+     * Card reader sales
+     *
+     * The page sends what to sell and which reader; everything is checked
+     * again here against what Mirlo says, then sent to Mirlo as the
+     * connected account. Mirlo checks that account manages the artist.
+     * ------------------------------------------------------------------ */
+
+    private static function reader_guard() {
+        check_ajax_referer( 'mirlo_reader', 'nonce' );
+        if ( ! current_user_can( self::READER_CAP ) || ! get_option( 'mirlo_reader_sales' ) ) {
+            wp_send_json_error( array( 'message' => 'You can\'t use the card reader.' ), 403 );
+        }
+    }
+
+    private static function reader_fail( $message, $detail = null ) {
+        wp_send_json_error(
+            array(
+                'message' => $message,
+                'detail'  => current_user_can( 'manage_options' ) ? $detail : null,
+            )
+        );
+    }
+
+    /** A Stripe-style ID from the request (pi_…, seti_…, acct_…, tmr_…), or ''. */
+    private static function id_param( $name, $pattern = '/^[A-Za-z0-9_]{1,255}$/' ) {
+        $value = isset( $_POST[ $name ] ) ? sanitize_text_field( wp_unslash( $_POST[ $name ] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- reader_guard() checked it.
+        return preg_match( $pattern, $value ) ? $value : '';
+    }
+
+    public function ajax_reader_charge() {
+        self::reader_guard();
+        // phpcs:disable WordPress.Security.NonceVerification.Missing -- reader_guard() checked it.
+        $artist    = isset( $_POST['artist'] ) ? sanitize_text_field( wp_unslash( $_POST['artist'] ) ) : '';
+        $kind      = isset( $_POST['kind'] ) ? sanitize_key( $_POST['kind'] ) : '';
+        $reader_id = self::id_param( 'reader_id' );
+
+        if ( '' === $artist || '' === $reader_id ) {
+            self::reader_fail( 'Choose a card reader.' );
+        }
+
+        $api  = new Mirlo_API();
+        $data = $api->get_artist( $artist );
+        if ( empty( $data['result']['id'] ) ) {
+            self::reader_fail( 'Couldn\'t load the artist. Please try again.', $data['error'] ?? 'No artist' );
+        }
+        $artist_id = (int) $data['result']['id'];
+
+        // Only the artist's own readers.
+        $readers = $api->get_artist_readers( $artist_id );
+        if ( ! in_array( $reader_id, array_column( (array) ( $readers['results'] ?? array() ), 'id' ), true ) ) {
+            self::reader_fail( 'That card reader isn\'t available. Reload the page and try again.', $readers['error'] ?? null );
+        }
+
+        $email = null;
+        if ( 'merch' === $kind ) {
+            $merch_id = isset( $_POST['merch_id'] ) ? sanitize_text_field( wp_unslash( $_POST['merch_id'] ) ) : '';
+            $merch    = null;
+            foreach ( (array) ( $api->get_artist_merch( $artist )['results'] ?? array() ) as $candidate ) {
+                if ( '' !== $merch_id && (string) ( $candidate['id'] ?? '' ) === $merch_id ) {
+                    $merch = $candidate;
+                }
+            }
+            if ( ! $merch || ! self::reader_eligible( $merch ) ) {
+                self::reader_fail( 'This item can\'t be sold on the card reader.' );
+            }
+
+            $chosen     = isset( $_POST['option_ids'] ) ? array_map( 'sanitize_text_field', wp_unslash( (array) $_POST['option_ids'] ) ) : array();
+            $option_ids = array();
+            foreach ( (array) $merch['optionTypes'] as $type ) {
+                $picked = array_values( array_intersect( $chosen, array_map( 'strval', array_column( (array) ( $type['options'] ?? array() ), 'id' ) ) ) );
+                if ( count( $picked ) > 1 ) {
+                    self::reader_fail( 'Choose one ' . ( $type['optionName'] ?? 'option' ) . '.' );
+                }
+                if ( ! $picked && ! empty( $type['required'] ) && ! empty( $type['options'] ) ) {
+                    self::reader_fail( 'Choose a ' . ( $type['optionName'] ?? 'option' ) . '.' );
+                }
+                $option_ids = array_merge( $option_ids, $picked );
+            }
+
+            $item = array(
+                'type'     => 'merch',
+                'id'       => $merch_id,
+                'quantity' => 1,
+            );
+            if ( $option_ids ) {
+                $item['merchOptionIds'] = $option_ids;
+            }
+        } elseif ( 'tier' === $kind ) {
+            $tier_id = isset( $_POST['tier_id'] ) ? absint( $_POST['tier_id'] ) : 0;
+            $tier    = null;
+            foreach ( (array) ( $data['result']['subscriptionTiers'] ?? array() ) as $candidate ) {
+                if ( $tier_id && (int) ( $candidate['id'] ?? 0 ) === $tier_id ) {
+                    $tier = $candidate;
+                }
+            }
+            if ( ! $tier || (int) ( $tier['minAmount'] ?? 0 ) <= 0 ) {
+                self::reader_fail( 'This tier can\'t be paid on the card reader.' );
+            }
+
+            $email = isset( $_POST['email'] ) ? sanitize_email( wp_unslash( $_POST['email'] ) ) : '';
+            if ( ! is_email( $email ) ) {
+                self::reader_fail( 'Enter the buyer\'s email address. Mirlo sends them their subscription there.' );
+            }
+
+            $item = array(
+                'type'   => 'subscription',
+                'tierId' => $tier_id,
+            );
+            if ( ! empty( $tier['allowVariable'] ) && isset( $_POST['amount'] ) && '' !== $_POST['amount'] ) {
+                $cents = (int) round( (float) sanitize_text_field( wp_unslash( $_POST['amount'] ) ) * 100 );
+                if ( $cents < (int) $tier['minAmount'] ) {
+                    self::reader_fail( sprintf( 'The amount must be at least %s.', number_format( $tier['minAmount'] / 100, 2 ) ) );
+                }
+                $item['amount'] = $cents;
+            }
+        } else {
+            self::reader_fail( 'Nothing to sell.' );
+        }
+        // phpcs:enable
+
+        $result = $api->purchase_on_reader( $artist_id, $reader_id, $item, $email );
+        $intent = $result['paymentIntentId'] ?? ( $result['setupIntentId'] ?? '' );
+
+        if ( isset( $result['error'] ) || '' === $intent || empty( $result['stripeAccountId'] ) ) {
+            $error = (string) ( $result['error'] ?? 'No intent in the response' );
+            if ( false !== stripos( $error, 'busy' ) ) {
+                $message = 'The card reader is busy with another payment. Finish or cancel that one first.';
+            } elseif ( false !== stripos( $error, 'offline' ) || false !== stripos( $error, 'unreachable' ) ) {
+                $message = 'The card reader is offline. Check that it\'s on and connected.';
+            } else {
+                $message = 'Couldn\'t send this to the card reader. Please try again.';
+            }
+            // Its status may have changed.
+            $api->forget_artist_readers( $artist_id );
+            self::reader_fail( $message, $error );
+        }
+
+        wp_send_json_success(
+            array(
+                'intentId'  => $intent,
+                'accountId' => $result['stripeAccountId'],
+                'timeout'   => self::READER_TIMEOUT,
+            )
+        );
+    }
+
+    public function ajax_reader_status() {
+        self::reader_guard();
+        $intent  = self::id_param( 'intent_id', '/^(pi|seti)_[A-Za-z0-9_]+$/' );
+        $account = self::id_param( 'account_id', '/^acct_[A-Za-z0-9_]+$/' );
+        if ( '' === $intent || '' === $account ) {
+            self::reader_fail( 'Unknown payment.' );
+        }
+
+        $result = ( new Mirlo_API() )->get_reader_purchase( $intent, $account );
+        if ( isset( $result['error'] ) || empty( $result['result']['status'] ) ) {
+            self::reader_fail( 'Couldn\'t check the payment.', $result['error'] ?? 'No status' );
+        }
+        wp_send_json_success( array( 'status' => (string) $result['result']['status'] ) );
+    }
+
+    public function ajax_reader_cancel() {
+        self::reader_guard();
+        $intent    = self::id_param( 'intent_id', '/^(pi|seti)_[A-Za-z0-9_]+$/' );
+        $account   = self::id_param( 'account_id', '/^acct_[A-Za-z0-9_]+$/' );
+        $reader_id = self::id_param( 'reader_id' );
+        if ( '' === $intent || '' === $account ) {
+            self::reader_fail( 'Unknown payment.' );
+        }
+
+        $result = ( new Mirlo_API() )->cancel_reader_purchase( $intent, $account, $reader_id );
+        if ( isset( $result['error'] ) ) {
+            // Most likely paid in the meantime.
+            self::reader_fail( 'Couldn\'t cancel. It may already be paid.', $result['error'] );
+        }
+        wp_send_json_success( array( 'status' => (string) ( $result['result']['status'] ?? 'canceled' ) ) );
+    }
+
     public function register_assets() {
         wp_register_style( 'mirlo-catalog', MIRLO_SUBSCRIBE_URL . 'assets/css/mirlo-catalog.css', array( 'mirlo-modal' ), MIRLO_SUBSCRIBE_VERSION );
         wp_register_script( 'mirlo-catalog', MIRLO_SUBSCRIBE_URL . 'assets/js/mirlo-catalog.js', array(), MIRLO_SUBSCRIBE_VERSION, true );
@@ -324,8 +710,10 @@ class Mirlo_Catalog {
             'mirlo-catalog',
             'mirloCatalog',
             array(
-                'ajax_url' => admin_url( 'admin-ajax.php' ),
-                'nonce'    => wp_create_nonce( 'mirlo_nonce_v2' ),
+                'ajax_url'     => admin_url( 'admin-ajax.php' ),
+                'nonce'        => wp_create_nonce( 'mirlo_nonce_v2' ),
+                // Only for people who can use the card reader.
+                'reader_nonce' => current_user_can( self::READER_CAP ) ? wp_create_nonce( 'mirlo_reader' ) : '',
             )
         );
 

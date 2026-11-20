@@ -24,6 +24,7 @@ require_once MIRLO_SUBSCRIBE_PATH . 'includes/class-mirlo-catalog.php';
 require_once MIRLO_SUBSCRIBE_PATH . 'includes/class-mirlo-admin.php';
 
 register_deactivation_hook( __FILE__, array( 'Mirlo_OAuth', 'unschedule_keep_alive' ) );
+register_activation_hook( __FILE__, array( 'Mirlo_Catalog', 'add_reader_capability' ) );
 
 add_action(
     'plugins_loaded',

@@ -12,13 +12,16 @@
  *   slow            Mirlo takes 3 seconds to answer, to see loading states
  *   no-subscribers  the connected account's subscriber list is empty
  *   no-merch        the artist has no merch
+ *   no-readers      the artist has no card readers
  *   old-mirlo       a Mirlo without GET /artists/{id}/merch (404), so
  *                   [mirlo_catalog] falls back to the artist's merch
  *   pay-what-you-want  tiers where people choose what they pay, like
  *                   Patchwork's: a member tier from $25 and an
  *                   organization tier from $100, plus one fixed-price tier
- * Any other slug is a normal artist with four tiers, a few subscribers, and
- * merch covering each way [mirlo_catalog] can sell it (see mock_mirlo_merch).
+ * Any other slug is a normal artist with four tiers, a few subscribers,
+ * merch covering each way [mirlo_catalog] can sell it (see mock_mirlo_merch),
+ * and two card readers: "Merch table" (online) and "Spare reader" (offline).
+ * A sale sent to a reader is paid on the third status check.
  *
  * Like the real Mirlo, checkout with a success_url on this site only works
  * once an API key is set in the settings. Any key will do here.
@@ -106,7 +109,8 @@ function mock_mirlo_route( $method, $path, $query, $args ) {
                 'refresh_token' => 'mock-refresh-' . wp_generate_password( 16, false ),
                 'token_type'    => 'Bearer',
                 'expires_in'    => HOUR_IN_SECONDS,
-                'scope'         => 'openid profile subscribers:read offline_access',
+                // What the site asked for when it last connected.
+                'scope'         => get_option( 'mock_mirlo_scope', 'openid profile subscribers:read offline_access' ),
             )
         );
     }
@@ -171,9 +175,23 @@ function mock_mirlo_route( $method, $path, $query, $args ) {
         return mock_mirlo_response( 200, array( 'results' => mock_mirlo_tiers() ) );
     }
 
+    // Card readers, with the pos scope.
+    if ( 'GET' === $method && preg_match( '#^/manage/artists/(\d+)/readers$#', $endpoint, $m ) ) {
+        if ( ! mock_mirlo_has_pos( $bearer ) ) {
+            return mock_mirlo_response( 401, array( 'error' => 'insufficient_scope' ) );
+        }
+        return mock_mirlo_response( 200, array( 'results' => '43' === $m[1] ? array() : mock_mirlo_readers() ) );
+    }
+    if ( preg_match( '#^/purchase/((?:pi|seti)_[A-Za-z0-9_]+)$#', $endpoint, $m ) ) {
+        return mock_mirlo_reader_intent( $method, $m[1], $query, $bearer );
+    }
+
     // Checkout: send the buyer to a stand-in for Stripe on this site. Real
     // Mirlo removed POST /artists/{id}/subscribe, so the mock doesn't answer it.
     $body = is_string( $args['body'] ?? null ) ? json_decode( $args['body'], true ) : ( $args['body'] ?? array() );
+    if ( 'POST' === $method && '/purchase' === $endpoint && ! empty( $body['readerId'] ) ) {
+        return mock_mirlo_reader_purchase( $body, $bearer );
+    }
     if ( 'POST' === $method && '/purchase' === $endpoint ) {
         $success_url = $body['successUrl'] ?? '';
         if ( '' !== $success_url ) {
@@ -282,6 +300,127 @@ function mock_mirlo_merch_error( $item ) {
     return null;
 }
 
+/* ----------------------------------------------------------------------
+ * Card readers. Sales sent to one are kept in an option, and move along
+ * one step each time their status is checked.
+ * ---------------------------------------------------------------------- */
+
+function mock_mirlo_has_pos( $bearer ) {
+    return 0 === strpos( $bearer, 'Bearer mock-access-' )
+        && in_array( 'pos', explode( ' ', (string) get_option( 'mock_mirlo_scope', '' ) ), true );
+}
+
+function mock_mirlo_readers() {
+    return array(
+        array( 'id' => 'tmr_spare', 'label' => 'Spare reader', 'deviceType' => 'bbpos_wisepos_e', 'status' => 'offline' ),
+        array( 'id' => 'tmr_table', 'label' => 'Merch table', 'deviceType' => 'bbpos_wisepos_e', 'status' => 'online' ),
+    );
+}
+
+/** Like POST /purchase with a readerId. */
+function mock_mirlo_reader_purchase( $body, $bearer ) {
+    if ( ! mock_mirlo_has_pos( $bearer ) ) {
+        return mock_mirlo_response( 401, array( 'error' => 'Dispatching to a terminal reader requires authentication' ) );
+    }
+    if ( 42 !== (int) ( $body['artistId'] ?? 0 ) ) {
+        return mock_mirlo_response( 404, array( 'error' => 'Artist not found or user does not have permission to edit it' ) );
+    }
+    $reader = null;
+    foreach ( mock_mirlo_readers() as $candidate ) {
+        if ( $candidate['id'] === $body['readerId'] ) {
+            $reader = $candidate;
+        }
+    }
+    if ( ! $reader ) {
+        return mock_mirlo_response( 400, array( 'error' => 'No such terminal.reader' ) );
+    }
+    if ( 'online' !== $reader['status'] ) {
+        return mock_mirlo_response( 400, array( 'error' => 'Reader is currently offline' ) );
+    }
+
+    $item = $body['items'][0] ?? array();
+    if ( 'merch' === ( $item['type'] ?? '' ) ) {
+        $error = mock_mirlo_merch_error( $item );
+        if ( $error ) {
+            return mock_mirlo_response( 400, array( 'error' => $error ) );
+        }
+        $id = 'pi_mock_' . wp_generate_password( 10, false );
+    } elseif ( 'subscription' === ( $item['type'] ?? '' ) ) {
+        if ( empty( $body['email'] ) ) {
+            return mock_mirlo_response( 400, array( 'error' => 'email is required' ) );
+        }
+        $error = mock_mirlo_amount_error( (int) ( $item['tierId'] ?? 0 ), $item['amount'] ?? null );
+        if ( $error ) {
+            return mock_mirlo_response( 400, array( 'error' => $error ) );
+        }
+        $id = 'seti_mock_' . wp_generate_password( 10, false );
+    } else {
+        return mock_mirlo_response( 400, array( 'error' => 'Unsupported item' ) );
+    }
+
+    $intents        = (array) get_option( 'mock_mirlo_intents', array() );
+    $intents[ $id ] = array(
+        'checks'   => 0,
+        'canceled' => false,
+        'item'     => $item,
+    );
+    update_option( 'mock_mirlo_intents', $intents, false );
+
+    return mock_mirlo_response(
+        200,
+        array(
+            0 === strpos( $id, 'seti_' ) ? 'setupIntentId' : 'paymentIntentId' => $id,
+            'stripeAccountId' => 'acct_mock',
+        )
+    );
+}
+
+/** GET (status) and DELETE (cancel) /purchase/{id}. */
+function mock_mirlo_reader_intent( $method, $id, $query, $bearer ) {
+    if ( ! mock_mirlo_has_pos( $bearer ) ) {
+        return mock_mirlo_response( 401, array( 'error' => 'insufficient_scope' ) );
+    }
+    $intents = (array) get_option( 'mock_mirlo_intents', array() );
+    if ( ! isset( $intents[ $id ] ) || 'acct_mock' !== ( $query['stripeAccountId'] ?? '' ) ) {
+        return mock_mirlo_response( 404, array( 'error' => 'Purchase not found' ) );
+    }
+    $intent = $intents[ $id ];
+    $setup  = 0 === strpos( $id, 'seti_' );
+    $status = function ( $intent ) use ( $setup ) {
+        if ( $intent['canceled'] ) {
+            return 'canceled';
+        }
+        if ( $intent['checks'] >= 3 ) {
+            return 'succeeded';
+        }
+        if ( 2 === $intent['checks'] ) {
+            return $setup ? 'processing' : 'requires_capture';
+        }
+        return 'requires_payment_method';
+    };
+
+    if ( 'DELETE' === $method ) {
+        if ( 'succeeded' === $status( $intent ) ) {
+            return mock_mirlo_response( 400, array( 'error' => 'Purchase has already completed and cannot be canceled' ) );
+        }
+        $intent['canceled'] = true;
+    } else {
+        ++$intent['checks'];
+    }
+    $intents[ $id ] = $intent;
+    update_option( 'mock_mirlo_intents', $intents, false );
+
+    return mock_mirlo_response(
+        200,
+        array(
+            'result' => array(
+                'id'     => $id,
+                'status' => $status( $intent ),
+            ),
+        )
+    );
+}
+
 function mock_mirlo_artist_error( $slug ) {
     return 'missing' === $slug
         ? mock_mirlo_response( 404, array( 'error' => 'Artist not found' ) )
@@ -298,7 +437,7 @@ function mock_mirlo_artist( $slug ) {
         . '<text x="50" y="62" font-size="40" text-anchor="middle" fill="#fff" font-family="sans-serif">MA</text></svg>'
     );
     return array(
-        'id'                => 42,
+        'id'                => 'no-readers' === $slug ? 43 : 42,
         'name'              => 'no-tiers' === $slug ? 'Artist Without Tiers' : 'Mock Artist',
         'urlSlug'           => $slug,
         'avatar'            => array( 'sizes' => array( '300' => $avatar ) ),
@@ -373,6 +512,8 @@ function mock_mirlo_merch( $slug = '' ) {
         $item( 'merch-tote', 'Tote bag', 1500, array( 'currency' => 'eur', 'shippingDestinations' => array( $eu ) ) ),
         // The artist's own shop.
         $item( 'merch-elsewhere', 'Hat from the band shop', 2200, array( 'externalUrl' => 'https://shop.example/hat' ) ),
+        // Link online, but sold on a reader: no shipping, a colour to choose.
+        $item( 'merch-pin', 'Enamel pin', 600, array( 'optionTypes' => array( array_merge( $colour, array( 'required' => true ) ) ) ) ),
         // Sold out.
         $item( 'merch-gone', 'Cassette', 1000, array( 'quantityRemaining' => 0 ) ),
     );
@@ -491,6 +632,9 @@ function mock_mirlo_authorize_page() {
         $params = 'allow' === $_GET['decision']
             ? array( 'code' => 'mock-code-' . wp_generate_password( 12, false ) )
             : array( 'error' => 'access_denied' );
+        if ( 'allow' === $_GET['decision'] ) {
+            update_option( 'mock_mirlo_scope', sanitize_text_field( wp_unslash( $_GET['scope'] ?? '' ) ), false );
+        }
         $params['state'] = $state;
         $params['iss']   = MOCK_MIRLO_INSTANCE;
         // Only back to this site, so this can't be used as an open redirect.

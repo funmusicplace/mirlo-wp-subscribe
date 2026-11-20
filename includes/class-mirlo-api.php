@@ -4,6 +4,8 @@ class Mirlo_API {
     const ARTIST_CACHE = 'mirlo_artist_';
     const ARTIST_TTL   = 15 * MINUTE_IN_SECONDS;
     const MERCH_CACHE  = 'mirlo_merch_';
+    const READER_CACHE = 'mirlo_readers_';
+    const READER_TTL   = MINUTE_IN_SECONDS;
 
     private $base_url;
     private $api_key;
@@ -147,6 +149,82 @@ class Mirlo_API {
         }
 
         return $this->make_request( '/purchase', 'POST', $body );
+    }
+
+    /**
+     * The card readers on the artist's Stripe account, as the connected
+     * Mirlo account (needs the pos scope). Each has id, label, deviceType
+     * and status ("online" or "offline"). Kept for a minute, so a reader
+     * that goes offline shows as such soon after.
+     *
+     * @param int  $artist_id Numeric artist ID.
+     * @param bool $fresh     Ask Mirlo even if there's a saved copy.
+     */
+    public function get_artist_readers( $artist_id, $fresh = false ) {
+        $key = $this->readers_key( $artist_id );
+        if ( ! $fresh ) {
+            $cached = get_transient( $key );
+            if ( is_array( $cached ) ) {
+                return $cached;
+            }
+        }
+        $result = $this->make_authenticated_request( '/manage/artists/' . intval( $artist_id ) . '/readers' );
+        if ( ! isset( $result['error'] ) && isset( $result['results'] ) && is_array( $result['results'] ) ) {
+            set_transient( $key, $result, self::READER_TTL );
+        }
+        return $result;
+    }
+
+    /** Drop the saved reader list, e.g. after a reader turned out to be offline. */
+    public function forget_artist_readers( $artist_id ) {
+        delete_transient( $this->readers_key( $artist_id ) );
+    }
+
+    private function readers_key( $artist_id ) {
+        return self::READER_CACHE . md5( $this->base_url . '|' . intval( $artist_id ) );
+    }
+
+    /**
+     * Send one item to a card reader, as the connected Mirlo account (needs
+     * the pos scope). The reader then asks for a card.
+     *
+     * Mirlo answers with paymentIntentId (merch) or setupIntentId (a
+     * subscription: the card is saved and charged monthly), and
+     * stripeAccountId, for get_reader_purchase() and cancel_reader_purchase().
+     *
+     * @param array       $item  One purchase item, e.g. array( 'type' => 'merch', 'id' => ... )
+     *                           or array( 'type' => 'subscription', 'tierId' => 2 ).
+     * @param string|null $email The buyer's email. Mirlo needs it for a subscription.
+     */
+    public function purchase_on_reader( $artist_id, $reader_id, $item, $email = null ) {
+        $body = array(
+            'artistId' => intval( $artist_id ),
+            'readerId' => (string) $reader_id,
+            'items'    => array( $item ),
+        );
+        if ( $email ) {
+            $body['email'] = $email;
+        }
+        return $this->make_authenticated_request( '/purchase', 'POST', $body );
+    }
+
+    /**
+     * A reader sale's status: Stripe's PaymentIntent or SetupIntent status,
+     * e.g. requires_payment_method (waiting for a card), requires_capture,
+     * processing, succeeded or canceled.
+     */
+    public function get_reader_purchase( $intent_id, $stripe_account_id ) {
+        return $this->make_authenticated_request(
+            '/purchase/' . rawurlencode( $intent_id ) . '?stripeAccountId=' . rawurlencode( $stripe_account_id )
+        );
+    }
+
+    /** Cancel a reader sale that hasn't been paid, and clear it from the reader. */
+    public function cancel_reader_purchase( $intent_id, $stripe_account_id, $reader_id ) {
+        return $this->make_authenticated_request(
+            '/purchase/' . rawurlencode( $intent_id ) . '?stripeAccountId=' . rawurlencode( $stripe_account_id ) . '&readerId=' . rawurlencode( $reader_id ),
+            'DELETE'
+        );
     }
 
     /**

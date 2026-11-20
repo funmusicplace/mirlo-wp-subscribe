@@ -143,3 +143,73 @@
   font-size: 0.9em;
   color: #b3261e;
 }
+
+/* Card reader sales (reader="yes", staff only). */
+
+:where(.mirlo-catalog__reader, .mirlo-catalog__reader-notice) {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  border: var(--mirlo-catalog-border);
+  border-radius: var(--mirlo-catalog-radius);
+}
+
+:where(.mirlo-catalog__reader-label, .mirlo-catalog__field) {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.9em;
+  font-weight: 600;
+}
+
+:where(.mirlo-catalog__reader-form) {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: var(--mirlo-catalog-border);
+}
+
+:where(.mirlo-catalog__reader-select, .mirlo-catalog__field select, .mirlo-catalog__field input) {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  font-weight: normal;
+}
+
+/* An outline, so it reads as the second way to pay. */
+:where(.mirlo-catalog__buy--reader) {
+  background: transparent;
+  color: var(--mirlo-accent, #1a73e8);
+  box-shadow: inset 0 0 0 2px var(--mirlo-accent, #1a73e8);
+}
+
+:where(.mirlo-catalog__buy--reader:hover, .mirlo-catalog__buy--reader:focus-visible) {
+  color: var(--mirlo-accent, #1a73e8);
+}
+
+:where(.mirlo-catalog__reader-status) {
+  margin: 0;
+  font-size: 0.9em;
+}
+
+:where(.mirlo-catalog__reader-status[data-state="paid"]) {
+  color: #1e7b34;
+  font-weight: 600;
+}
+
+:where(.mirlo-catalog__reader-status[data-state="error"]) {
+  color: #b3261e;
+}
+
+:where(.mirlo-catalog__reader-cancel) {
+  align-self: flex-start;
+  padding: 0.25rem 0.75rem;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.9em;
+  cursor: pointer;
+}

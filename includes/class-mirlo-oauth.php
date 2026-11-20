@@ -113,10 +113,21 @@ class Mirlo_OAuth {
     }
 
     public static function scopes() {
-        return apply_filters(
-            'mirlo_oauth_scopes',
-            array( 'openid', 'profile', 'subscribers:read', 'offline_access' )
-        );
+        $scopes = array( 'openid', 'profile', 'subscribers:read', 'offline_access' );
+        // Card reader sales: list the artist's readers and send sales to them.
+        if ( get_option( 'mirlo_reader_sales' ) ) {
+            $scopes[] = 'pos';
+        }
+        return apply_filters( 'mirlo_oauth_scopes', $scopes );
+    }
+
+    /**
+     * Whether the current connection was granted a scope. Asking for a new
+     * scope only takes effect after connecting again.
+     */
+    public static function has_scope( $scope ) {
+        $tokens = self::get_tokens();
+        return $tokens && in_array( $scope, explode( ' ', (string) ( $tokens['scope'] ?? '' ) ), true );
     }
 
     /* ------------------------------------------------------------------

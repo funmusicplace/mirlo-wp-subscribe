@@ -1,0 +1,70 @@
+/* Settings → Mirlo Subscribe */
+
+/* Takes Enter-key submits ahead of the Connect button, out of sight. */
+.mirlo-settings .mirlo-default-submit {
+    position: absolute;
+    left: -9999px;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+}
+
+.mirlo-settings .mirlo-tool-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+}
+
+.mirlo-settings .mirlo-tool-result {
+    margin-top: 10px;
+    max-width: 900px;
+}
+
+.mirlo-settings .mirlo-tool-result:empty {
+    display: none;
+}
+
+.mirlo-settings .mirlo-tool-result h4 {
+    margin: 1em 0 0.3em;
+}
+
+.mirlo-settings .mirlo-id-list {
+    margin: 0;
+}
+
+.mirlo-settings .mirlo-account > summary,
+.mirlo-settings .mirlo-attributes > summary {
+    cursor: pointer;
+}
+
+.mirlo-settings .mirlo-account > summary h2 {
+    display: inline;
+}
+
+.mirlo-settings .mirlo-account {
+    margin-top: 1.5em;
+}
+
+.mirlo-settings .mirlo-optional {
+    font-weight: normal;
+    color: #646970;
+}
+
+.mirlo-settings .mirlo-client-id > summary {
+    cursor: pointer;
+    color: #2271b1;
+    margin-bottom: 6px;
+}
+
+.mirlo-settings .mirlo-shortcodes {
+    max-width: 900px;
+}
+
+.mirlo-settings .mirlo-attributes {
+    margin-top: 1em;
+}
+
+.mirlo-settings .mirlo-attributes > summary {
+    margin-bottom: 0.5em;
+}

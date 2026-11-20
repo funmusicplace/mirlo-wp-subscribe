@@ -77,9 +77,9 @@ check "the old subscribe AJAX action is gone" "0" "$(curl -s "$B/wp-admin/admin-
 section "catalog"
 CAT=$(curl -s "$B/?pagename=mirlo-preview")
 cat_count() { echo "$CAT" | grep -o "$1" | wc -l | tr -d ' '; }
-check "Buy buttons: 2 in the full catalog, 2 picked" 4 "$(cat_count 'data-mirlo-buy="merch"')"
-check "Subscribe buttons: 4 in the full catalog, 2 picked" 6 "$(cat_count 'data-mirlo-buy="tier"')"
-check "Buy on Mirlo links: vinyl, shirt, tote, plus 5 from the old-Mirlo fallback" 8 "$(cat_count '>Buy on Mirlo</a>')"
+check "Buy buttons: 2 in the full catalog, 2 picked, 2 in the reader catalog" 6 "$(cat_count 'data-mirlo-buy="merch"')"
+check "Subscribe buttons: 4 in the full catalog, 2 picked, 3 in the reader catalogs" 9 "$(cat_count 'data-mirlo-buy="tier"')"
+check "Buy on Mirlo links: vinyl, shirt, tote, pin, 6 from the old-Mirlo fallback, pin in the reader catalog" 11 "$(cat_count '>Buy on Mirlo</a>')"
 check_has "  linking to the item's page" 'href="http://mirlo.mock/mock-artist/merch/merch-vinyl"' "$CAT"
 check_has "the artist's own shop link" 'href="https://shop.example/hat"' "$CAT"
 check "sold out, in the catalog and the fallback" 2 "$(cat_count 'mirlo-catalog__item--sold-out')"
@@ -123,9 +123,14 @@ section "connecting"
 curl -s -c $J -b $J -o /dev/null "$B/wp-login.php"
 curl -s -c $J -b $J -o /dev/null "$B/wp-login.php" -d log=admin -d pwd=admin -d wp-submit=1 -d testcookie=1
 SET="$B/wp-admin/options-general.php?page=mirlo-subscribe"
-start_connect() {
-  local cn=$(curl -s -b $J "$SET" | grep -A2 'value="mirlo_oauth_connect"' | grep -o 'name="_wpnonce" value="[^"]*"' | cut -d'"' -f4)
-  curl -s -b $J -c $J -o /dev/null -w '%{redirect_url}' "$B/wp-admin/admin-post.php" -d action=mirlo_oauth_connect -d _wpnonce=$cn -d _wp_http_referer=/wp-admin/options-general.php?page=mirlo-subscribe
+form_nonce() { curl -s -b $J "$SET" | grep -o 'name="_wpnonce" value="[^"]*"' | head -1 | cut -d'"' -f4; }
+SAVED='$o = array(); foreach ( array( "mirlo_instance_url", "mirlo_oauth_client_id", "mirlo_reader_sales", "mirlo_api_key", "mirlo_button_color" ) as $k ) { $o[ $k ] = get_option( $k ); } echo http_build_query( $o );'
+save_form() { # extra fields; submits the settings form with what's saved, and prints where it redirects
+  curl -s -b $J -c $J -o /dev/null -w '%{redirect_url}' "$B/wp-admin/options.php" -d option_page=mirlo_subscribe_settings -d action=update \
+    -d _wpnonce=$(form_nonce) -d _wp_http_referer=/wp-admin/options-general.php?page=mirlo-subscribe -d "$($WPCLI eval "$SAVED")" "$@"
+}
+start_connect() { # "Connect to Mirlo" saves the settings, then connects
+  curl -s -b $J -c $J -o /dev/null -w '%{redirect_url}' "$(save_form -d mirlo_connect=1)"
 }
 finish_connect() { # authorize URL, decision
   local back=$(curl -s -b $J -o /dev/null -w '%{redirect_url}' "$1&decision=$2")
@@ -147,6 +152,16 @@ check "every subscriber has a Mirlo user ID" "True" "$(subs mock-artist | json '
 check "an empty list is fine" "[]" "$(subs no-subscribers | json 'd["data"]')"
 check "a missing artist is an error" "False" "$(subs missing | json 'd["success"]')"
 check "logged out: refused" "0" "$(curl -s "$B/wp-admin/admin-ajax.php" -d action=mirlo_preview_subscribers -d nonce=$AN -d artist=mock-artist)"
+
+section "settings page"
+chk() { curl -s -b $J "$B/wp-admin/admin-ajax.php" -d action=mirlo_check_artist -d nonce=$AN -d slug=$1; }
+check "check an artist: tiers listed with IDs" "1,2,3,4" "$(chk mock-artist | json '",".join(str(t["id"]) for t in d["data"]["tiers"])')"
+check "  and merch" "True" "$(chk mock-artist | json 'len(d["data"]["merch"]) > 0')"
+check_has "  a missing artist says so" "There's no artist" "$(chk missing | json 'd["data"]')"
+SP=$(curl -s -b $J "$SET")
+check_lacks "no Default Button Text setting" "mirlo_button_text" "$SP"
+check_has "the reference lists [mirlo_catalog]" "[mirlo_catalog artist=" "$SP"
+check_has "connected: the account section is open" '<details class="mirlo-account" open>' "$SP"
 
 section "daily renewal"
 cronlist() { $WPCLI cron event list --fields=hook --format=csv 2>/dev/null | grep -c mirlo_oauth_keepalive; }
@@ -185,14 +200,94 @@ $WPCLI option update mock_mirlo_preview_hash stale >/dev/null
 curl -s -o /dev/null "$B/?pagename=mirlo-preview"
 check "re-syncing keeps a single preview page" 1 "$($WPCLI post list --post_type=page --name=mirlo-preview --format=count)"
 
+section "card reader"
+login() { # cookie jar, user, password
+  curl -s -c $1 -b $1 -o /dev/null "$B/wp-login.php"
+  curl -s -c $1 -b $1 -o /dev/null "$B/wp-login.php" -d log=$2 -d pwd=$3 -d wp-submit=1 -d testcookie=1
+}
+readers() { echo "$1" | grep -o 'class="mirlo-catalog__reader-form"' | wc -l | tr -d ' '; }
+ANON=$(curl -s "$B/?pagename=mirlo-preview")
+check "signed out: no reader forms" 0 "$(readers "$ANON")"
+check_has "  and no reader nonce" '"reader_nonce":""' "$ANON"
+check_lacks "  and no reader notices" 'mirlo-catalog__reader-notice' "$ANON"
+check "administrators have the capability" "yes" "$($WPCLI eval 'echo get_role("administrator")->has_cap("mirlo_use_reader") ? "yes" : "no";')"
+check_has "admin, reader sales off: told how to set them up" "Turn them on in Settings" "$(curl -s -b $J "$B/?pagename=mirlo-preview")"
+
+check_has "ticking card reader sales goes on to connect" "action=mirlo_oauth_connect" "$(save_form -d mirlo_reader_sales=1)"
+check "  and turns them on" 1 "$($WPCLI option get mirlo_reader_sales)"
+check_lacks "saving again with them on just saves" "action=mirlo_oauth_connect" "$(save_form)"
+check_has "turned on: settings ask to connect again" "Connect again" "$(curl -s -b $J "$SET")"
+check_has "  and pages still say it isn't set up" "Turn them on in Settings" "$(curl -s -b $J "$B/?pagename=mirlo-preview")"
+finish_connect "$(start_connect)" allow >/dev/null
+check "connecting again grants pos" "yes" "$($WPCLI eval 'echo Mirlo_OAuth::has_scope("pos") ? "yes" : "no";')"
+check_lacks "  and the settings stop asking" "Connect again" "$(curl -s -b $J "$SET")"
+
+RP=$(curl -s -b $J "$B/?pagename=mirlo-preview")
+check "reader forms: zine, pin, two paid tiers (not the poster, which has shipping)" 4 "$(readers "$RP")"
+check_has "  a menu for the pin's colour" '<select name="option_ids[]" required><option value="">Choose…</option><option value="opt-s">' "$RP"
+check_has "  an amount for a pay-what-you-want tier" 'name="amount" min="5.00"' "$RP"
+check_has "the online reader is listed first" '<select class="mirlo-catalog__reader-select"><option value="tmr_table">Merch table</option><option value="tmr_spare">Spare reader (offline)</option>' "$RP"
+check_has "an artist without readers says so" "This artist has no card readers on Mirlo." "$RP"
+RN=$(echo "$RP" | grep -o '"reader_nonce":"[^"]*"' | cut -d'"' -f4)
+rc() { curl -s -b $J "$B/wp-admin/admin-ajax.php" -d action=mirlo_reader_charge -d nonce=$RN -d artist=mock-artist "$@"; }
+rs() { curl -s -b $J "$B/wp-admin/admin-ajax.php" -d action=mirlo_reader_status -d nonce=$RN -d intent_id=$1 -d account_id=acct_mock | json 'd["data"]["status"]'; }
+SALE=$(rc -d reader_id=tmr_table -d kind=merch -d merch_id=merch-digital)
+PI=$(echo "$SALE" | json 'd["data"]["intentId"]')
+check_has "zine sent to the reader" "pi_mock_" "$PI"
+check "  with the Stripe account to check it with" "acct_mock" "$(echo "$SALE" | json 'd["data"]["accountId"]')"
+check "  waiting for the card" "requires_payment_method" "$(rs $PI)"
+check "  card read" "requires_capture" "$(rs $PI)"
+check "  paid" "succeeded" "$(rs $PI)"
+check "the pin needs a colour" "Choose a colour." "$(rc -d reader_id=tmr_table -d kind=merch -d merch_id=merch-pin | json 'd["data"]["message"]')"
+check "  a colour from another item is ignored" "Choose a colour." "$(rc -d reader_id=tmr_table -d kind=merch -d merch_id=merch-pin -d 'option_ids[]=nope' | json 'd["data"]["message"]')"
+PIN=$(rc -d reader_id=tmr_table -d kind=merch -d merch_id=merch-pin -d 'option_ids[]=' -d 'option_ids[]=opt-m' | json 'd["data"]["intentId"]')
+check_has "  with one it's sent" "pi_mock_" "$PIN"
+check "  and can be cancelled" "canceled" "$(curl -s -b $J "$B/wp-admin/admin-ajax.php" -d action=mirlo_reader_cancel -d nonce=$RN -d intent_id=$PIN -d account_id=acct_mock -d reader_id=tmr_table | json 'd["data"]["status"]')"
+check "  which sticks" "canceled" "$(rs $PIN)"
+check "items with shipping can't be sold on the reader" "This item can't be sold on the card reader." "$(rc -d reader_id=tmr_table -d kind=merch -d merch_id=merch-poster | json 'd["data"]["message"]')"
+check "an offline reader" "The card reader is offline. Check that it's on and connected." "$(rc -d reader_id=tmr_spare -d kind=merch -d merch_id=merch-digital | json 'd["data"]["message"]')"
+check "another artist's reader" "That card reader isn't available. Reload the page and try again." "$(rc -d reader_id=tmr_other -d kind=merch -d merch_id=merch-digital | json 'd["data"]["message"]')"
+check "a tier needs the buyer's email" "False" "$(rc -d reader_id=tmr_table -d kind=tier -d tier_id=2 | json 'd["success"]')"
+check_has "  with it, the card is saved for the subscription" "seti_mock_" "$(rc -d reader_id=tmr_table -d kind=tier -d tier_id=2 -d email=fan@example.com -d amount=7.50 | json 'd["data"]["intentId"]')"
+check "  not below the tier's minimum" "The amount must be at least 5.00." "$(rc -d reader_id=tmr_table -d kind=tier -d tier_id=2 -d email=fan@example.com -d amount=1 | json 'd["data"]["message"]')"
+check "  not a free tier" "False" "$(rc -d reader_id=tmr_table -d kind=tier -d tier_id=1 -d email=fan@example.com | json 'd["success"]')"
+check "signed out: the reader actions don't exist" "0" "$(curl -s "$B/wp-admin/admin-ajax.php" -d action=mirlo_reader_charge -d nonce=$RN)"
+check "a status check without the reader nonce is refused" "-1" "$(curl -s -b $J "$B/wp-admin/admin-ajax.php" -d action=mirlo_reader_status -d nonce=nope -d intent_id=$PI -d account_id=acct_mock)"
+
+$WPCLI user create vol vol@example.com --role=subscriber --user_pass=vol >/dev/null
+V="$S/vol-cookies"; login $V vol vol
+check "a volunteer without the capability: no reader forms" 0 "$(readers "$(curl -s -b $V "$B/?pagename=mirlo-preview")")"
+check_has "  nor a reader nonce" '"reader_nonce":""' "$(curl -s -b $V "$B/?pagename=mirlo-preview")"
+check "  so the actions are refused" "-1" "$(curl -s -b $V "$B/wp-admin/admin-ajax.php" -d action=mirlo_reader_status -d nonce=$RN -d intent_id=$PI -d account_id=acct_mock)"
+$WPCLI user add-cap vol mirlo_use_reader >/dev/null
+VP=$(curl -s -b $V "$B/?pagename=mirlo-preview")
+check "given the capability: reader forms" 4 "$(readers "$VP")"
+VRN=$(echo "$VP" | grep -o '"reader_nonce":"[^"]*"' | cut -d'"' -f4)
+check_has "  and can send a sale" "pi_mock_" "$(curl -s -b $V "$B/wp-admin/admin-ajax.php" -d action=mirlo_reader_charge -d nonce=$VRN -d artist=mock-artist -d reader_id=tmr_table -d kind=merch -d merch_id=merch-digital | json 'd["data"]["intentId"]')"
+$WPCLI option update mirlo_reader_sales 0 >/dev/null
+check "turned off: the actions are refused" "False" "$(curl -s -b $V "$B/wp-admin/admin-ajax.php" -d action=mirlo_reader_status -d nonce=$VRN -d intent_id=$PI -d account_id=acct_mock | json 'd["success"]')"
+check_has "  and staff are told it isn't set up" "Ask a site admin" "$(curl -s -b $V "$B/?pagename=mirlo-preview")"
+$WPCLI option update mirlo_reader_sales 1 >/dev/null
+$WPCLI user remove-cap vol mirlo_use_reader >/dev/null
+check "capability taken away: a nonce from before is refused" "False" "$(curl -s -b $V "$B/wp-admin/admin-ajax.php" -d action=mirlo_reader_charge -d nonce=$VRN -d artist=mock-artist -d reader_id=tmr_table -d kind=merch -d merch_id=merch-digital | json 'd["success"]')"
+
+section "disconnecting"
+DL=$(curl -s -b $J "$SET" | grep -oE 'href="[^"]*mirlo_oauth_disconnect[^"]*"' | head -1 | cut -d'"' -f2 | sed 's/&#038;/\&/g; s/&amp;/\&/g')
+curl -s -b $J -o /dev/null "$DL"
+check "the Disconnect link disconnects" "none" "$(tok)"
+check_has "  and the page offers to connect" "Connect to Mirlo" "$(curl -s -b $J "$SET")"
+check "disconnecting without a nonce is refused" 403 "$(curl -s -b $J -o /dev/null -w '%{http_code}' "$B/wp-admin/admin-post.php?action=mirlo_oauth_disconnect")"
+
 section "settings: Client ID and instance changes"
 save() { # instance client_id
-  local n=$(curl -s -b $J "$SET" | grep -o 'name="_wpnonce" value="[^"]*"' | head -1 | cut -d'"' -f4)
   curl -s -b $J -c $J -o /dev/null "$B/wp-admin/options.php" -d option_page=mirlo_subscribe_settings -d action=update \
-    -d _wpnonce=$n -d _wp_http_referer=/wp-admin/options-general.php?page=mirlo-subscribe \
-    --data-urlencode mirlo_instance_url="$1" --data-urlencode mirlo_oauth_client_id="$2" -d mirlo_button_text=Subscribe
+    -d _wpnonce=$(form_nonce) -d _wp_http_referer=/wp-admin/options-general.php?page=mirlo-subscribe \
+    --data-urlencode mirlo_instance_url="$1" --data-urlencode mirlo_oauth_client_id="$2"
   $WPCLI option get mirlo_oauth_client_id 2>/dev/null
 }
+check "a save that raises a warning doesn't go on to connect" "settings-updated=true" "$(curl -s -b $J -c $J -o /dev/null -w '%{redirect_url}' "$B/wp-admin/options.php" -d option_page=mirlo_subscribe_settings -d action=update \
+    -d _wpnonce=$(form_nonce) -d _wp_http_referer=/wp-admin/options-general.php?page=mirlo-subscribe -d mirlo_instance_url=https://other.example -d mirlo_oauth_client_id=1 -d mirlo_connect=1 | grep -o 'settings-updated=true')"
+$WPCLI option update mirlo_instance_url http://mirlo.mock >/dev/null; $WPCLI option update mirlo_oauth_client_id 1 >/dev/null
 check "nothing changes: ID kept" 1 "$(save http://mirlo.mock 1)"
 check "instance changed, ID left as it was: cleared" "" "$(save https://mirlo.space 1)"
 check_has "  with a warning" "Client ID was cleared" "$(curl -s -b $J "$SET&settings-updated=true")"
