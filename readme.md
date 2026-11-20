@@ -4,7 +4,7 @@ Contributors: Mirlo Code Circle
 Tags: mirlo, music, subscriptions, modal
 Requires at least: 6.0
 Tested up to: 6.5
-Stable tag: 1.4.0
+Stable tag: 1.5.0
 License: AGPLv3 or later
 
 Add Mirlo artist subscription modals to any post or page via shortcode.
@@ -197,4 +197,5 @@ Nothing in `dev/`, `package.json`, `composer.json` or `phpcs.xml.dist` is includ
 1.2.0 Connect a Mirlo account over OAuth to read subscribers, renewed daily, with a warning on every admin page if Mirlo ends it; choose the Mirlo instance; deleting the plugin removes its settings and disconnects from Mirlo; `[mirlo_subscribe]` and `[mirlo_tiers]` now use the same checkout as `[mirlo_pop_up]` and `[mirlo_tier_list]`, since Mirlo removed the endpoint they used
 1.3.0 `Mirlo_API::purchase_subscription()` takes an optional monthly amount, for tiers where people choose what they pay
 1.3.1 `success_url` must be a page on this site or on Mirlo, and is checked again when someone checks out; artist details are kept for 15 minutes; visitors see a short message instead of Mirlo's raw error when tiers can't load or checkout fails (admins still see the details); `Mirlo_API::return_url()` and the artist cache are public, for add-ons
-1.4.0 `[mirlo_catalog]` shows an artist's merch and tiers as cards that go straight to Mirlo's checkout; staff with the `mirlo_use_reader` capability can send sales to the artist's card readers with `reader="yes"`, once **Card Reader Sales** is on and the site has connected with Mirlo's `pos` permission; `Mirlo_API::get_artist_merch()`, `purchase_merch()`, `get_artist_readers()`, `purchase_on_reader()`, `get_reader_purchase()` and `cancel_reader_purchase()`; a tidier settings page: the Mirlo account is an optional section, **Connect to Mirlo** saves the settings first, **Check an artist** lists tiers and merch with their IDs, the shortcode reference covers every shortcode, and the unused **Default Button Text** setting is gone
+1.4.0 `[mirlo_catalog]` shows an artist's merch and tiers as cards that go straight to Mirlo's checkout; `Mirlo_API::get_artist_merch()` and `purchase_merch()`
+1.5.0 Staff with the `mirlo_use_reader` capability can send `[mirlo_catalog]` sales to the artist's card readers with `reader="yes"`, once **Card Reader Sales** is on and the site has connected with Mirlo's `pos` permission; `Mirlo_API::get_artist_readers()`, `purchase_on_reader()`, `get_reader_purchase()` and `cancel_reader_purchase()`; a tidier settings page: the Mirlo account is an optional section, **Connect to Mirlo** saves the settings first, **Check an artist** lists tiers and merch with their IDs, the shortcode reference covers every shortcode, and the unused **Default Button Text** setting is gone
