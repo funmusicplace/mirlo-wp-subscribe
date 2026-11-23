@@ -1,10 +1,22 @@
 /* global mirloCatalog */
 /*
  * [mirlo_catalog]: format prices for the visitor's locale, start Mirlo's
- * hosted checkout when someone presses Buy or Subscribe, and send sales to
- * a card reader with "Pay on reader" (staff only).
+ * hosted checkout when someone presses Buy or Subscribe, and (staff only)
+ * sell on a card reader: merch is added to a sale that's charged in one go,
+ * and paid tiers have their own "Pay on reader".
  */
 (function () {
+  function money(cents, currency) {
+    try {
+      return new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency: currency,
+      }).format(cents / 100);
+    } catch (e) {
+      return currency + " " + (cents / 100).toFixed(2);
+    }
+  }
+
   function formatPrices() {
     document
       .querySelectorAll(".mirlo-catalog__price[data-amount]")
@@ -94,6 +106,14 @@
     if (cancel && !cancel.disabled) {
       cancelReaderSale(cancel.closest(".mirlo-catalog__reader-form"));
     }
+    var change = e.target.closest("[data-sale-change]");
+    if (change) {
+      changeLine(change);
+    }
+    var clear = e.target.closest(".mirlo-catalog__sale-clear");
+    if (clear) {
+      clearSale(clear.closest(".mirlo-catalog__sale"));
+    }
   });
 
   /* ------------------------------------------------------------------
@@ -143,6 +163,11 @@
     return "mirloReader:" + (bar ? bar.dataset.artistId : "");
   }
 
+  function readerBar(el) {
+    var catalog = el.closest(".mirlo-catalog");
+    return catalog && catalog.querySelector(".mirlo-catalog__reader");
+  }
+
   function setReaderStatus(form, text, state) {
     var status = form.querySelector(".mirlo-catalog__reader-status");
     status.textContent = text;
@@ -155,9 +180,21 @@
     form._sale = null;
     setReaderStatus(form, text, state);
     form.querySelector(".mirlo-catalog__reader-cancel").hidden = true;
+    resetSubmit(form);
+  }
+
+  function resetSubmit(form) {
     var submit = form.querySelector('[type="submit"]');
-    submit.disabled = false;
-    submit.textContent = "Pay on reader";
+    submit.textContent = submit.dataset.label;
+    submit.disabled = isSale(form) && !currentLines(form).length;
+    if (isSale(form)) {
+      renderSale(form);
+    }
+  }
+
+  // Sent to the reader and not given up on yet.
+  function saleInProgress(form) {
+    return !!(form._sale && Date.now() < form._sale.giveUpAt);
   }
 
   function payOnReader(form) {
@@ -177,11 +214,26 @@
     data.set("artist", catalog.dataset.artist);
     data.set("reader_id", select.value);
     data.set("kind", form.dataset.mirloReader);
-    if (form.dataset.merchId) {
-      data.set("merch_id", form.dataset.merchId);
-    }
     if (form.dataset.tierId) {
       data.set("tier_id", form.dataset.tierId);
+    }
+    if (isSale(form)) {
+      var lines = currentLines(form);
+      if (!lines.length) {
+        return;
+      }
+      data.set(
+        "cart",
+        JSON.stringify(
+          lines.map(function (line) {
+            return {
+              merch_id: line.merchId,
+              qty: line.qty,
+              option_ids: line.optionIds,
+            };
+          }),
+        ),
+      );
     }
 
     var readerName = select.options[select.selectedIndex].text.replace(
@@ -192,6 +244,11 @@
     submit.disabled = true;
     submit.textContent = "Sending…";
     setReaderStatus(form, "");
+    // Nothing can change until the reader answers.
+    form._sale = { pending: true, giveUpAt: Infinity };
+    if (isSale(form)) {
+      renderSale(form);
+    }
 
     post(data)
       .then(function (d) {
@@ -240,6 +297,9 @@
             if (email) {
               email.value = "";
             }
+            if (isSale(form)) {
+              setSaleLines(form, []);
+            }
             finishReaderSale(
               form,
               form.dataset.mirloReader === "tier"
@@ -280,14 +340,12 @@
       "No payment yet. Check the reader, or cancel and try again.",
       "error",
     );
-    var submit = form.querySelector('[type="submit"]');
-    submit.disabled = false;
-    submit.textContent = "Pay on reader";
+    resetSubmit(form);
   }
 
   function cancelReaderSale(form) {
     var sale = form._sale;
-    if (!sale) {
+    if (!sale || sale.pending) {
       return;
     }
     var cancel = form.querySelector(".mirlo-catalog__reader-cancel");
@@ -312,14 +370,277 @@
       });
   }
 
+  /* ------------------------------------------------------------------
+   * The sale: merch added from the cards, charged on the reader in one go.
+   * Kept in sessionStorage per artist, so a reload doesn't lose it. Prices
+   * here are only for showing; the server and Mirlo work out the charge.
+   * ------------------------------------------------------------------ */
+
+  function isSale(form) {
+    return form.dataset.mirloReader === "cart";
+  }
+
+  function saleKey(el) {
+    var bar = readerBar(el);
+    return "mirloSale:" + (bar ? bar.dataset.artistId : "");
+  }
+
+  function saleLines(el) {
+    try {
+      var lines = JSON.parse(sessionStorage.getItem(saleKey(el)) || "[]");
+      return Array.isArray(lines) ? lines : [];
+    } catch (err) {
+      return [];
+    }
+  }
+
+  // Saves the sale and redraws it in every catalog for the same artist.
+  function setSaleLines(el, lines) {
+    var key = saleKey(el);
+    try {
+      if (lines.length) {
+        sessionStorage.setItem(key, JSON.stringify(lines));
+      } else {
+        sessionStorage.removeItem(key);
+      }
+    } catch (err) {
+      // Private browsing: the sale lasts until the page is left.
+    }
+    document.querySelectorAll(".mirlo-catalog__sale").forEach(function (form) {
+      if (saleKey(form) === key) {
+        form._lines = lines;
+        renderSale(form);
+      }
+    });
+  }
+
+  function currentLines(form) {
+    return form._lines || saleLines(form);
+  }
+
+  function renderSale(form) {
+    var lines = currentLines(form);
+    var locked = saleInProgress(form);
+    var list = form.querySelector(".mirlo-catalog__sale-lines");
+    var total = form.querySelector(".mirlo-catalog__sale-total");
+    var submit = form.querySelector('[type="submit"]');
+
+    list.textContent = "";
+    var sum = 0;
+    lines.forEach(function (line, i) {
+      sum += line.price * line.qty;
+      var li = document.createElement("li");
+      li.className = "mirlo-catalog__sale-line";
+
+      var name = document.createElement("span");
+      name.className = "mirlo-catalog__sale-name";
+      name.textContent =
+        line.title + (line.detail ? " (" + line.detail + ")" : "");
+
+      var qty = document.createElement("span");
+      qty.className = "mirlo-catalog__sale-qty";
+      qty.append(
+        lineButton("−", "Remove one " + line.title, i, -1, locked),
+        document.createTextNode(" " + line.qty + " "),
+        lineButton(
+          "+",
+          "Add one more " + line.title,
+          i,
+          1,
+          locked || roomFor(lines, line) < 1,
+        ),
+      );
+
+      var price = document.createElement("span");
+      price.className = "mirlo-catalog__sale-price";
+      price.textContent = money(line.price * line.qty, line.currency);
+
+      li.append(
+        name,
+        qty,
+        price,
+        lineButton("×", "Remove " + line.title, i, 0, locked),
+      );
+      list.appendChild(li);
+    });
+
+    list.hidden = !lines.length;
+    form.querySelector(".mirlo-catalog__sale-empty").hidden = !!lines.length;
+    form.querySelector(".mirlo-catalog__sale-clear").hidden =
+      !lines.length || locked;
+    total.hidden = !lines.length;
+    total.textContent = lines.length
+      ? "Total " + money(sum, lines[0].currency)
+      : "";
+    if (!form._sale) {
+      submit.disabled = !lines.length;
+    }
+  }
+
+  function lineButton(text, label, index, step, disabled) {
+    var button = document.createElement("button");
+    button.type = "button";
+    button.className = "mirlo-catalog__sale-button";
+    button.textContent = text;
+    button.setAttribute("aria-label", label);
+    button.dataset.saleChange = step;
+    button.dataset.line = index;
+    button.disabled = !!disabled;
+    return button;
+  }
+
+  // How many more of this line fit, by what's left of the item and of its
+  // variants, across every line of the sale.
+  function roomFor(lines, line) {
+    var room = Infinity;
+    if (line.stock != null) {
+      room =
+        line.stock -
+        countOf(lines, function (l) {
+          return l.merchId === line.merchId;
+        });
+    }
+    (line.optionStock || []).forEach(function (o) {
+      room = Math.min(
+        room,
+        o.stock -
+          countOf(lines, function (l) {
+            return l.optionIds.indexOf(o.id) !== -1;
+          }),
+      );
+    });
+    return room;
+  }
+
+  function countOf(lines, match) {
+    return lines.reduce(function (n, l) {
+      return n + (match(l) ? l.qty : 0);
+    }, 0);
+  }
+
+  function changeLine(button) {
+    var form = button.closest(".mirlo-catalog__sale");
+    if (!form || saleInProgress(form)) {
+      return;
+    }
+    var lines = currentLines(form).slice();
+    var i = Number(button.dataset.line);
+    var step = Number(button.dataset.saleChange);
+    if (!lines[i]) {
+      return;
+    }
+    if (step === 0 || lines[i].qty + step < 1) {
+      lines.splice(i, 1);
+    } else if (step < 0 || roomFor(lines, lines[i]) >= step) {
+      lines[i] = Object.assign({}, lines[i], { qty: lines[i].qty + step });
+    }
+    setReaderStatus(form, "");
+    setSaleLines(form, lines);
+  }
+
+  function clearSale(form) {
+    if (!form || saleInProgress(form)) {
+      return;
+    }
+    setReaderStatus(form, "");
+    setSaleLines(form, []);
+  }
+
+  function addToSale(addForm) {
+    var bar = readerBar(addForm);
+    var sale = bar && bar.querySelector(".mirlo-catalog__sale");
+    if (!sale) {
+      return;
+    }
+    var button = addForm.querySelector('[type="submit"]');
+    if (saleInProgress(sale)) {
+      flash(button, "Finish the sale on the reader first");
+      return;
+    }
+    if (addForm.reportValidity && !addForm.reportValidity()) {
+      return;
+    }
+
+    var optionIds = [];
+    var names = [];
+    var optionStock = [];
+    var price = Number(addForm.dataset.price) || 0;
+    addForm.querySelectorAll("select").forEach(function (select) {
+      var option = select.options[select.selectedIndex];
+      if (!option || !option.value) {
+        return;
+      }
+      optionIds.push(option.value);
+      names.push(option.dataset.name);
+      price += Number(option.dataset.price) || 0;
+      if (option.dataset.stock != null) {
+        optionStock.push({
+          id: option.value,
+          stock: Number(option.dataset.stock),
+        });
+      }
+    });
+
+    var line = {
+      key: addForm.dataset.merchId + "|" + optionIds.slice().sort().join(","),
+      merchId: addForm.dataset.merchId,
+      optionIds: optionIds,
+      title: addForm.dataset.title,
+      detail: names.join(", "),
+      price: price,
+      currency: addForm.dataset.currency,
+      stock:
+        addForm.dataset.stock != null ? Number(addForm.dataset.stock) : null,
+      optionStock: optionStock,
+      qty: 1,
+    };
+
+    var lines = currentLines(sale).slice();
+    if (roomFor(lines, line) < 1) {
+      flash(button, "No more left");
+      return;
+    }
+    var same = lines.findIndex(function (l) {
+      return l.key === line.key;
+    });
+    if (same === -1) {
+      lines.push(line);
+    } else {
+      lines[same] = Object.assign({}, lines[same], {
+        qty: lines[same].qty + 1,
+      });
+    }
+    setReaderStatus(sale, "");
+    setSaleLines(sale, lines);
+    flash(button, "Added");
+  }
+
+  // Says what happened on the button for a moment.
+  function flash(button, text) {
+    clearTimeout(button._flash);
+    if (!button.dataset.label) {
+      button.dataset.label = button.textContent;
+    }
+    button.textContent = text;
+    button._flash = setTimeout(function () {
+      button.textContent = button.dataset.label;
+    }, 1200);
+  }
+
   document.addEventListener("submit", function (e) {
+    var add = e.target.closest(".mirlo-catalog__add-form");
+    if (add) {
+      e.preventDefault();
+      addToSale(add);
+      return;
+    }
     var form = e.target.closest(".mirlo-catalog__reader-form");
     if (!form) {
       return;
     }
     e.preventDefault();
     // Still waiting on the last one: cancel that first.
-    if (form._sale && Date.now() < form._sale.giveUpAt) {
+    if (saleInProgress(form)) {
       return;
     }
     payOnReader(form);
@@ -375,6 +696,7 @@
   function ready() {
     formatPrices();
     restoreReaders();
+    document.querySelectorAll(".mirlo-catalog__sale").forEach(renderSale);
   }
 
   if (document.readyState === "loading") {

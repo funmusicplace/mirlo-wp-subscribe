@@ -269,8 +269,11 @@ function mock_mirlo_amount_error( $tier_id, $amount ) {
     return null;
 }
 
-/** Like Mirlo's resolveMerchPurchaseItem and resolveMerchOptionIds. */
-function mock_mirlo_merch_error( $item ) {
+/**
+ * Like Mirlo's resolveMerchPurchaseItem and resolveMerchOptionIds. A sale on
+ * a card reader ($point_of_sale) has no shipping.
+ */
+function mock_mirlo_merch_error( $item, $point_of_sale = false ) {
     $merch = null;
     foreach ( mock_mirlo_merch() as $candidate ) {
         if ( $candidate['id'] === ( $item['id'] ?? '' ) ) {
@@ -283,13 +286,26 @@ function mock_mirlo_merch_error( $item ) {
     if ( 0 === $merch['quantityRemaining'] ) {
         return 'This merch is sold out';
     }
+    // Like checkMerchStock: each line on its own.
+    $qty = (int) ( $item['quantity'] ?? 1 );
+    if ( null !== $merch['quantityRemaining'] && $qty > $merch['quantityRemaining'] ) {
+        return 'Not enough stock remaining for this merch item';
+    }
     foreach ( $merch['optionTypes'] as $type ) {
         $chosen = array_intersect( array_column( $type['options'], 'id' ), (array) ( $item['merchOptionIds'] ?? array() ) );
         if ( $type['required'] && $type['options'] && ! $chosen ) {
             return 'You have to choose a ' . $type['optionName'] . ' for this merch item';
         }
+        foreach ( $type['options'] as $option ) {
+            if ( in_array( $option['id'], $chosen, true ) && isset( $option['quantityRemaining'] ) && $qty > $option['quantityRemaining'] ) {
+                return 'Not enough stock remaining for option ' . $option['name'];
+            }
+        }
     }
-    if ( $merch['shippingDestinations'] ) {
+    if ( $point_of_sale && ! empty( $merch['includePurchaseTrackGroupId'] ) && empty( $item['email'] ) ) {
+        return "A download or subscription sold at the point of sale needs the buyer's email";
+    }
+    if ( $merch['shippingDestinations'] && ! $point_of_sale ) {
         if ( empty( $item['shippingDestinationId'] ) ) {
             return 'shippingDestinationId is required for this merch item';
         }
@@ -338,11 +354,22 @@ function mock_mirlo_reader_purchase( $body, $bearer ) {
         return mock_mirlo_response( 400, array( 'error' => 'Reader is currently offline' ) );
     }
 
-    $item = $body['items'][0] ?? array();
+    $items = (array) ( $body['items'] ?? array() );
+    $item  = $items[0] ?? array();
+    if ( ! $items ) {
+        return mock_mirlo_response( 400, array( 'error' => 'artistId and items are required' ) );
+    }
+    if ( count( $items ) > 1 && in_array( 'subscription', array_column( $items, 'type' ), true ) ) {
+        return mock_mirlo_response( 400, array( 'error' => 'Subscription must be the only item in the cart' ) );
+    }
     if ( 'merch' === ( $item['type'] ?? '' ) ) {
-        $error = mock_mirlo_merch_error( $item );
-        if ( $error ) {
-            return mock_mirlo_response( 400, array( 'error' => $error ) );
+        foreach ( $items as $line ) {
+            $error = 'merch' === ( $line['type'] ?? '' )
+                ? mock_mirlo_merch_error( array_merge( $line, array( 'email' => $body['email'] ?? '' ) ), true )
+                : 'Unsupported item';
+            if ( $error ) {
+                return mock_mirlo_response( 400, array( 'error' => $error ) );
+            }
         }
         $id = 'pi_mock_' . wp_generate_password( 10, false );
     } elseif ( 'subscription' === ( $item['type'] ?? '' ) ) {
@@ -362,7 +389,7 @@ function mock_mirlo_reader_purchase( $body, $bearer ) {
     $intents[ $id ] = array(
         'checks'   => 0,
         'canceled' => false,
-        'item'     => $item,
+        'items'    => $items,
     );
     update_option( 'mock_mirlo_intents', $intents, false );
 
@@ -499,11 +526,22 @@ function mock_mirlo_merch( $slug = '' ) {
         ),
     );
     $colour = array_merge( $sizes, array( 'optionName' => 'colour', 'required' => false ) );
+
+    $pin_colours = array(
+        'optionName' => 'colour',
+        'required'   => true,
+        'options'    => array(
+            array( 'id' => 'opt-red', 'name' => 'Red', 'quantityRemaining' => null, 'additionalPrice' => 0 ),
+            array( 'id' => 'opt-gold', 'name' => 'Gold', 'quantityRemaining' => 2, 'additionalPrice' => 100 ),
+            array( 'id' => 'opt-silver', 'name' => 'Silver', 'quantityRemaining' => 0, 'additionalPrice' => 0 ),
+        ),
+    );
     return array(
         // Checkout, no shipping.
         $item( 'merch-digital', 'Digital zine', 800, array( 'images' => $image( '#2a7a4b', 'zine' ) ) ),
         // Checkout, with the one shipping region. An optional variant is left out.
-        $item( 'merch-poster', 'Tour poster', 2000, array( 'images' => $image( '#be3455', 'poster' ), 'quantityRemaining' => 3, 'shippingDestinations' => array( $us ), 'optionTypes' => array( $colour ) ) ),
+        // On a reader: no shipping, 3 left, and a download that needs an email.
+        $item( 'merch-poster', 'Tour poster', 2000, array( 'images' => $image( '#be3455', 'poster' ), 'quantityRemaining' => 3, 'includePurchaseTrackGroupId' => 7, 'shippingDestinations' => array( $us ), 'optionTypes' => array( $colour ) ) ),
         // Link: more than one shipping region.
         $item( 'merch-vinyl', 'Vinyl LP', 2500, array( 'images' => $image( '#1a73e8', 'vinyl' ), 'shippingDestinations' => array( $us, $world ) ) ),
         // Link: a size has to be chosen.
@@ -512,8 +550,9 @@ function mock_mirlo_merch( $slug = '' ) {
         $item( 'merch-tote', 'Tote bag', 1500, array( 'currency' => 'eur', 'shippingDestinations' => array( $eu ) ) ),
         // The artist's own shop.
         $item( 'merch-elsewhere', 'Hat from the band shop', 2200, array( 'externalUrl' => 'https://shop.example/hat' ) ),
-        // Link online, but sold on a reader: no shipping, a colour to choose.
-        $item( 'merch-pin', 'Enamel pin', 600, array( 'optionTypes' => array( array_merge( $colour, array( 'required' => true ) ) ) ) ),
+        // Link online, but sold on a reader: a colour to choose. Gold costs
+        // $1 more and has 2 left; silver is sold out.
+        $item( 'merch-pin', 'Enamel pin', 600, array( 'optionTypes' => array( $pin_colours ) ) ),
         // Sold out.
         $item( 'merch-gone', 'Cassette', 1000, array( 'quantityRemaining' => 0 ) ),
     );

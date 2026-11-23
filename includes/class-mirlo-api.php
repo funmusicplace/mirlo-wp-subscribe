@@ -4,6 +4,7 @@ class Mirlo_API {
     const ARTIST_CACHE = 'mirlo_artist_';
     const ARTIST_TTL   = 15 * MINUTE_IN_SECONDS;
     const MERCH_CACHE  = 'mirlo_merch_';
+    const MERCH_TTL    = 2 * MINUTE_IN_SECONDS;
     const READER_CACHE = 'mirlo_readers_';
     const READER_TTL   = MINUTE_IN_SECONDS;
 
@@ -38,7 +39,7 @@ class Mirlo_API {
 
     /**
      * An artist's public merch, with each item's variants and shipping
-     * regions. Kept for 15 minutes, like the artist.
+     * regions. Kept for only 2 minutes, so stock changes show up soon.
      *
      * @param string|int $artist Artist URL slug or ID.
      * @param bool       $fresh  Ask Mirlo even if there's a saved copy.
@@ -53,7 +54,7 @@ class Mirlo_API {
         }
         $result = $this->make_request( '/artists/' . rawurlencode( (string) $artist ) . '/merch' );
         if ( ! isset( $result['error'] ) && isset( $result['results'] ) && is_array( $result['results'] ) ) {
-            set_transient( $key, $result, self::ARTIST_TTL );
+            set_transient( $key, $result, self::MERCH_TTL );
         }
         return $result;
     }
@@ -185,22 +186,24 @@ class Mirlo_API {
     }
 
     /**
-     * Send one item to a card reader, as the connected Mirlo account (needs
-     * the pos scope). The reader then asks for a card.
+     * Send a sale to a card reader, as the connected Mirlo account (needs
+     * the pos scope). The reader then asks for a card for the whole sale.
      *
      * Mirlo answers with paymentIntentId (merch) or setupIntentId (a
      * subscription: the card is saved and charged monthly), and
      * stripeAccountId, for get_reader_purchase() and cancel_reader_purchase().
      *
-     * @param array       $item  One purchase item, e.g. array( 'type' => 'merch', 'id' => ... )
-     *                           or array( 'type' => 'subscription', 'tierId' => 2 ).
-     * @param string|null $email The buyer's email. Mirlo needs it for a subscription.
+     * @param array       $items Purchase items, e.g. array( 'type' => 'merch', 'id' => ..., 'quantity' => 2 ),
+     *                           or a single array( 'type' => 'subscription', 'tierId' => 2 ),
+     *                           which Mirlo sells on its own.
+     * @param string|null $email The buyer's email. Mirlo needs it for a subscription
+     *                           and for merch that comes with a download.
      */
-    public function purchase_on_reader( $artist_id, $reader_id, $item, $email = null ) {
+    public function purchase_on_reader( $artist_id, $reader_id, $items, $email = null ) {
         $body = array(
             'artistId' => intval( $artist_id ),
             'readerId' => (string) $reader_id,
-            'items'    => array( $item ),
+            'items'    => array_values( $items ),
         );
         if ( $email ) {
             $body['email'] = $email;

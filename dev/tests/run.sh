@@ -205,7 +205,7 @@ login() { # cookie jar, user, password
   curl -s -c $1 -b $1 -o /dev/null "$B/wp-login.php"
   curl -s -c $1 -b $1 -o /dev/null "$B/wp-login.php" -d log=$2 -d pwd=$3 -d wp-submit=1 -d testcookie=1
 }
-readers() { echo "$1" | grep -o 'class="mirlo-catalog__reader-form"' | wc -l | tr -d ' '; }
+readers() { echo "$1" | grep -oE 'class="mirlo-catalog__(reader|add)-form' | wc -l | tr -d ' '; }
 ANON=$(curl -s "$B/?pagename=mirlo-preview")
 check "signed out: no reader forms" 0 "$(readers "$ANON")"
 check_has "  and no reader nonce" '"reader_nonce":""' "$ANON"
@@ -223,30 +223,50 @@ check "connecting again grants pos" "yes" "$($WPCLI eval 'echo Mirlo_OAuth::has_
 check_lacks "  and the settings stop asking" "Connect again" "$(curl -s -b $J "$SET")"
 
 RP=$(curl -s -b $J "$B/?pagename=mirlo-preview")
-check "reader forms: zine, pin, two paid tiers (not the poster, which has shipping)" 4 "$(readers "$RP")"
-check_has "  a menu for the pin's colour" '<select name="option_ids[]" required><option value="">Choose…</option><option value="opt-s">' "$RP"
+check "Add to sale: zine, pin and poster (shipping is left off on a reader)" 3 "$(echo "$RP" | grep -o 'class="mirlo-catalog__add-form"' | wc -l | tr -d ' ')"
+check "  one sale, in the catalog with merch" 1 "$(echo "$RP" | grep -o 'data-mirlo-reader="cart"' | wc -l | tr -d ' ')"
+check "Pay on reader: the two paid tiers" 2 "$(echo "$RP" | grep -o 'data-mirlo-reader="tier"' | wc -l | tr -d ' ')"
+check_has "  a menu for the pin's colour" '<select name="option_ids[]" required><option value="">Choose…</option><option value="opt-red" data-name="Red" data-price="0">Red</option><option value="opt-gold" data-name="Gold" data-price="100" data-stock="2">Gold</option><option value="opt-silver" data-name="Silver" data-price="0" data-stock="0" disabled>Silver (sold out)</option>' "$RP"
+check_has "  the poster's stock, for the sale" 'data-merch-id="merch-poster" data-title="Tour poster" data-price="2000" data-currency="USD" data-stock="3"' "$RP"
 check_has "  an amount for a pay-what-you-want tier" 'name="amount" min="5.00"' "$RP"
 check_has "the online reader is listed first" '<select class="mirlo-catalog__reader-select"><option value="tmr_table">Merch table</option><option value="tmr_spare">Spare reader (offline)</option>' "$RP"
 check_has "an artist without readers says so" "This artist has no card readers on Mirlo." "$RP"
 RN=$(echo "$RP" | grep -o '"reader_nonce":"[^"]*"' | cut -d'"' -f4)
 rc() { curl -s -b $J "$B/wp-admin/admin-ajax.php" -d action=mirlo_reader_charge -d nonce=$RN -d artist=mock-artist "$@"; }
+sale() { rc -d reader_id=${READER:-tmr_table} -d kind=cart --data-urlencode cart="$1" "${@:2}"; }
+msg() { json 'd["data"]["message"]'; }
 rs() { curl -s -b $J "$B/wp-admin/admin-ajax.php" -d action=mirlo_reader_status -d nonce=$RN -d intent_id=$1 -d account_id=acct_mock | json 'd["data"]["status"]'; }
-SALE=$(rc -d reader_id=tmr_table -d kind=merch -d merch_id=merch-digital)
+ZINE='[{"merch_id":"merch-digital","qty":1}]'
+SALE=$(sale '[{"merch_id":"merch-digital","qty":2},{"merch_id":"merch-pin","qty":1,"option_ids":["opt-red"]},{"merch_id":"merch-pin","qty":2,"option_ids":["opt-gold"]}]')
 PI=$(echo "$SALE" | json 'd["data"]["intentId"]')
-check_has "zine sent to the reader" "pi_mock_" "$PI"
+check_has "two zines and three pins sent to the reader as one sale" "pi_mock_" "$PI"
+check "  as three lines" '[{"type": "merch", "id": "merch-digital", "quantity": 2}, {"type": "merch", "id": "merch-pin", "quantity": 1, "merchOptionIds": ["opt-red"]}, {"type": "merch", "id": "merch-pin", "quantity": 2, "merchOptionIds": ["opt-gold"]}]' "$($WPCLI eval 'echo wp_json_encode( get_option( "mock_mirlo_intents" )[ "'$PI'" ]["items"] );' | json 'json.dumps(d)')"
 check "  with the Stripe account to check it with" "acct_mock" "$(echo "$SALE" | json 'd["data"]["accountId"]')"
 check "  waiting for the card" "requires_payment_method" "$(rs $PI)"
 check "  card read" "requires_capture" "$(rs $PI)"
 check "  paid" "succeeded" "$(rs $PI)"
-check "the pin needs a colour" "Choose a colour." "$(rc -d reader_id=tmr_table -d kind=merch -d merch_id=merch-pin | json 'd["data"]["message"]')"
-check "  a colour from another item is ignored" "Choose a colour." "$(rc -d reader_id=tmr_table -d kind=merch -d merch_id=merch-pin -d 'option_ids[]=nope' | json 'd["data"]["message"]')"
-PIN=$(rc -d reader_id=tmr_table -d kind=merch -d merch_id=merch-pin -d 'option_ids[]=' -d 'option_ids[]=opt-m' | json 'd["data"]["intentId"]')
-check_has "  with one it's sent" "pi_mock_" "$PIN"
-check "  and can be cancelled" "canceled" "$(curl -s -b $J "$B/wp-admin/admin-ajax.php" -d action=mirlo_reader_cancel -d nonce=$RN -d intent_id=$PIN -d account_id=acct_mock -d reader_id=tmr_table | json 'd["data"]["status"]')"
+check "the pin needs a colour" "Choose a colour for Enamel pin." "$(sale '[{"merch_id":"merch-pin","qty":1}]' | msg)"
+check "  a colour from another item is ignored" "Choose a colour for Enamel pin." "$(sale '[{"merch_id":"merch-pin","qty":1,"option_ids":["opt-s"]}]' | msg)"
+check "  only one colour" "Choose one colour for Enamel pin." "$(sale '[{"merch_id":"merch-pin","qty":1,"option_ids":["opt-red","opt-gold"]}]' | msg)"
+check "a colour's stock counts across lines" "Only 2 of Enamel pin (Gold) left." "$(sale '[{"merch_id":"merch-pin","qty":1,"option_ids":["opt-gold"]},{"merch_id":"merch-pin","qty":2,"option_ids":["opt-gold"]}]' | msg)"
+check "  and so does an item's" "Only 3 of Tour poster left." "$(sale '[{"merch_id":"merch-poster","qty":2},{"merch_id":"merch-poster","qty":2,"option_ids":["opt-s"]}]' -d email=fan@example.com | msg)"
+PIN=$(sale '[{"merch_id":"merch-pin","qty":1,"option_ids":["opt-red"]}]' | json 'd["data"]["intentId"]')
+check_has "a sale can be cancelled" "pi_mock_" "$PIN"
+check "  on the reader" "canceled" "$(curl -s -b $J "$B/wp-admin/admin-ajax.php" -d action=mirlo_reader_cancel -d nonce=$RN -d intent_id=$PIN -d account_id=acct_mock -d reader_id=tmr_table | json 'd["data"]["status"]')"
 check "  which sticks" "canceled" "$(rs $PIN)"
-check "items with shipping can't be sold on the reader" "This item can't be sold on the card reader." "$(rc -d reader_id=tmr_table -d kind=merch -d merch_id=merch-poster | json 'd["data"]["message"]')"
-check "an offline reader" "The card reader is offline. Check that it's on and connected." "$(rc -d reader_id=tmr_spare -d kind=merch -d merch_id=merch-digital | json 'd["data"]["message"]')"
-check "another artist's reader" "That card reader isn't available. Reload the page and try again." "$(rc -d reader_id=tmr_other -d kind=merch -d merch_id=merch-digital | json 'd["data"]["message"]')"
+check "merch with a download needs the buyer's email" "Something in this sale comes with a download. Enter the buyer's email so Mirlo can send it." "$(sale '[{"merch_id":"merch-poster","qty":1}]' | msg)"
+check_has "  with it, it's sent, without shipping" "pi_mock_" "$(sale '[{"merch_id":"merch-poster","qty":1}]' -d email=fan@example.com | json 'd["data"]["intentId"]')"
+check "  a bad email is caught here" "That email address doesn't look right." "$(sale "$ZINE" -d email=nope | msg)"
+check "sold out" "Cassette can't be sold on the card reader any more. Remove it from the sale." "$(sale '[{"merch_id":"merch-gone","qty":1}]' | msg)"
+check "the artist's own shop" "Hat from the band shop can't be sold on the card reader any more. Remove it from the sale." "$(sale '[{"merch_id":"merch-elsewhere","qty":1}]' | msg)"
+check "an item that isn't there" "An item can't be sold on the card reader any more. Remove it from the sale." "$(sale '[{"merch_id":"nope","qty":1}]' | msg)"
+check "a quantity of 0" "Check the quantity of Digital zine." "$(sale '[{"merch_id":"merch-digital","qty":0}]' | msg)"
+check "an empty sale" "Nothing in this sale yet." "$(sale '[]' | msg)"
+check "  or not a list" "Nothing in this sale yet." "$(sale 'nope' | msg)"
+check "  or lines that aren't lines" "An item can't be sold on the card reader any more. Remove it from the sale." "$(sale '["merch-digital"]' | msg)"
+check "too many lines" "A sale can have up to 50 lines." "$(sale "[$(python3 -c 'print(",".join(["{\"merch_id\":\"merch-digital\",\"qty\":1}"]*51))')]" | msg)"
+check "an offline reader" "The card reader is offline. Check that it's on and connected." "$(READER=tmr_spare sale "$ZINE" | msg)"
+check "another artist's reader" "That card reader isn't available. Reload the page and try again." "$(READER=tmr_other sale "$ZINE" | msg)"
 check "a tier needs the buyer's email" "False" "$(rc -d reader_id=tmr_table -d kind=tier -d tier_id=2 | json 'd["success"]')"
 check_has "  with it, the card is saved for the subscription" "seti_mock_" "$(rc -d reader_id=tmr_table -d kind=tier -d tier_id=2 -d email=fan@example.com -d amount=7.50 | json 'd["data"]["intentId"]')"
 check "  not below the tier's minimum" "The amount must be at least 5.00." "$(rc -d reader_id=tmr_table -d kind=tier -d tier_id=2 -d email=fan@example.com -d amount=1 | json 'd["data"]["message"]')"
@@ -261,15 +281,15 @@ check_has "  nor a reader nonce" '"reader_nonce":""' "$(curl -s -b $V "$B/?pagen
 check "  so the actions are refused" "-1" "$(curl -s -b $V "$B/wp-admin/admin-ajax.php" -d action=mirlo_reader_status -d nonce=$RN -d intent_id=$PI -d account_id=acct_mock)"
 $WPCLI user add-cap vol mirlo_use_reader >/dev/null
 VP=$(curl -s -b $V "$B/?pagename=mirlo-preview")
-check "given the capability: reader forms" 4 "$(readers "$VP")"
+check "given the capability: reader forms" 6 "$(readers "$VP")"
 VRN=$(echo "$VP" | grep -o '"reader_nonce":"[^"]*"' | cut -d'"' -f4)
-check_has "  and can send a sale" "pi_mock_" "$(curl -s -b $V "$B/wp-admin/admin-ajax.php" -d action=mirlo_reader_charge -d nonce=$VRN -d artist=mock-artist -d reader_id=tmr_table -d kind=merch -d merch_id=merch-digital | json 'd["data"]["intentId"]')"
+check_has "  and can send a sale" "pi_mock_" "$(curl -s -b $V "$B/wp-admin/admin-ajax.php" -d action=mirlo_reader_charge -d nonce=$VRN -d artist=mock-artist -d reader_id=tmr_table -d kind=cart --data-urlencode cart="$ZINE" | json 'd["data"]["intentId"]')"
 $WPCLI option update mirlo_reader_sales 0 >/dev/null
 check "turned off: the actions are refused" "False" "$(curl -s -b $V "$B/wp-admin/admin-ajax.php" -d action=mirlo_reader_status -d nonce=$VRN -d intent_id=$PI -d account_id=acct_mock | json 'd["success"]')"
 check_has "  and staff are told it isn't set up" "Ask a site admin" "$(curl -s -b $V "$B/?pagename=mirlo-preview")"
 $WPCLI option update mirlo_reader_sales 1 >/dev/null
 $WPCLI user remove-cap vol mirlo_use_reader >/dev/null
-check "capability taken away: a nonce from before is refused" "False" "$(curl -s -b $V "$B/wp-admin/admin-ajax.php" -d action=mirlo_reader_charge -d nonce=$VRN -d artist=mock-artist -d reader_id=tmr_table -d kind=merch -d merch_id=merch-digital | json 'd["success"]')"
+check "capability taken away: a nonce from before is refused" "False" "$(curl -s -b $V "$B/wp-admin/admin-ajax.php" -d action=mirlo_reader_charge -d nonce=$VRN -d artist=mock-artist -d reader_id=tmr_table -d kind=cart --data-urlencode cart="$ZINE" | json 'd["success"]')"
 
 section "disconnecting"
 DL=$(curl -s -b $J "$SET" | grep -oE 'href="[^"]*mirlo_oauth_disconnect[^"]*"' | head -1 | cut -d'"' -f2 | sed 's/&#038;/\&/g; s/&amp;/\&/g')

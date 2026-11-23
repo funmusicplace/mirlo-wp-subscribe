@@ -170,6 +170,94 @@
   border-top: var(--mirlo-catalog-border);
 }
 
+:where(.mirlo-catalog__add-form) {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+/* The sale in the reader bar. */
+:where(.mirlo-catalog__sale-empty, .mirlo-catalog__sale-total) {
+  margin: 0;
+}
+
+:where(.mirlo-catalog__sale-total) {
+  font-weight: 600;
+  text-align: right;
+}
+
+:where(.mirlo-catalog__sale-lines) {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+:where(.mirlo-catalog__sale-line) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.75rem;
+  padding: 0.4rem 0;
+  border-bottom: var(--mirlo-catalog-border);
+}
+
+:where(.mirlo-catalog__sale-name) {
+  flex: 1 1 10rem;
+}
+
+:where(.mirlo-catalog__sale-qty) {
+  white-space: nowrap;
+}
+
+/* Right-aligned, with ×, when a narrow screen wraps them to their own row. */
+:where(.mirlo-catalog__sale-price) {
+  min-width: 5rem;
+  margin-left: auto;
+  text-align: right;
+}
+
+:where(.mirlo-catalog__sale-button) {
+  min-width: 2.25rem;
+  min-height: 2.25rem;
+  padding: 0 0.5rem;
+  border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+:where(.mirlo-catalog__sale-button[disabled]) {
+  cursor: default;
+  opacity: 0.4;
+}
+
+:where(.mirlo-catalog__sale-actions) {
+  display: flex;
+  gap: 0.5rem;
+}
+
+:where(.mirlo-catalog__sale-actions .mirlo-catalog__buy) {
+  flex: 1;
+}
+
+:where(.mirlo-catalog__sale .mirlo-catalog__buy[disabled]) {
+  cursor: default;
+}
+
+:where(.mirlo-catalog__sale-clear) {
+  padding: 0.25rem 0.75rem;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.9em;
+  cursor: pointer;
+}
+
 :where(.mirlo-catalog__reader-select, .mirlo-catalog__field select, .mirlo-catalog__field input) {
   width: 100%;
   box-sizing: border-box;

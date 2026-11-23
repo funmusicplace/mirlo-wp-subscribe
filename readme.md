@@ -52,7 +52,7 @@ card.
 | `color` | Button colour, as `#hex` |
 | `merch_title`, `tiers_title` | Section headings (default "Merch" and "Subscriptions"). Empty for none |
 | `success_url` | As for `[mirlo_pop_up]` |
-| `reader` | `yes` adds **Pay on reader** for staff (see below) |
+| `reader` | `yes` adds card reader sales for staff (see below) |
 
 Mirlo's checkout can't choose a variant or a shipping region, so merch is
 bought one item at a time, at its minimum price, and:
@@ -72,9 +72,13 @@ Mirlo's point-of-sale page) and the buyer taps their card:
    permission, signed in as an account that manages the artist.
 2. Add `reader="yes"` to the shortcode.
 
-People with the `mirlo_use_reader` capability then get a reader menu above
-the cards and a **Pay on reader** form on each card that can be sold that
-way. The page waits for the card and says when it's paid, with a **Cancel**
+People with the `mirlo_use_reader` capability then get a reader menu and a
+sale above the cards. **Add to sale** on a merch card puts it in the sale,
+where quantities can be changed, and **Charge on reader** sends the whole
+sale to the reader as one payment. The sale is kept in the browser tab until
+it's paid or cleared, so reloading the page doesn't lose it. Paid tiers have
+their own **Pay on reader**, since Mirlo sells a subscription on its own.
+The page waits for the card and says when it's paid, with a **Cancel**
 button until then. Everyone else sees the catalog as usual. Administrators
 have the capability; give it to other roles or people, such as volunteers,
 with a role editor or a filter:
@@ -88,9 +92,10 @@ with a role editor or a filter:
 
 What can go on a reader:
 
-- merch that's in stock, sold through Mirlo and has **no shipping regions**:
-  Mirlo adds shipping to items that have them, even when the buyer takes the
-  item home. Variants are chosen from a menu on the card;
+- merch that's in stock and sold through Mirlo. Mirlo leaves shipping off
+  sales on a reader. Variants are chosen from a menu on the card, and the
+  sale can't have more of an item or a variant than is left. Merch that
+  comes with a download needs the buyer's email, which the sale asks for;
 - paid subscription tiers. Staff enter the buyer's email, where Mirlo sends
   the subscription, and the amount for pay-what-you-want tiers. The card is
   saved and charged monthly.
@@ -101,7 +106,10 @@ What can go on a reader:
 `__description`, `__actions`, `__buy`, `__buy--link`, `__buy--sold-out`,
 `__error`, and for card reader sales `__reader`, `__reader-notice`,
 `__reader-label`, `__reader-select`, `__reader-form`, `__field`,
-`__buy--reader`, `__reader-status` and `__reader-cancel`). The plugin's rules have no specificity, so any rule in your theme
+`__buy--reader`, `__reader-status`, `__reader-cancel`, `__add-form`, and for
+the sale `__sale`, `__sale-empty`, `__sale-lines`, `__sale-line`,
+`__sale-name`, `__sale-qty`, `__sale-price`, `__sale-button`, `__sale-total`,
+`__sale-actions` and `__sale-clear`). The plugin's rules have no specificity, so any rule in your theme
 wins. For small changes, set these CSS variables on `.mirlo-catalog`:
 `--mirlo-accent`, `--mirlo-catalog-columns`, `--mirlo-catalog-min-width`,
 `--mirlo-catalog-gap`, `--mirlo-catalog-radius`, `--mirlo-catalog-image-ratio`
